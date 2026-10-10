@@ -218,3 +218,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Fluixer local files and packaged dependencies
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+*.fluixer
+fluixel_snapshot_*.json
+vendor/*
+!vendor/models/
+outputs/
+releases/
+_migration_backups/

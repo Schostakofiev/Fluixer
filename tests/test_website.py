@@ -8,7 +8,7 @@ from unittest.mock import patch
 @unittest.skipUnless(importlib.util.find_spec('flask'), 'Install requirements-web.txt')
 class WebsiteTests(unittest.TestCase):
     def setUp(self):
-        from fluixel.website import create_app
+        from fluixer.website import create_app
         self.config={'FLUIXER_ORIGIN':'https://fluixer.example','FLUIXER_USERNAME':'guest','FLUIXER_PASSWORD':'test-password-for-ci-only'}
         self.app=create_app(self.config)
         self.client=self.app.test_client()
@@ -24,7 +24,7 @@ class WebsiteTests(unittest.TestCase):
         self.assertNotIn(b'{{VERSION}}',r.data)
         self.assertEqual(r.headers['Cache-Control'],'no-store')
     def test_config_host_health(self):
-        from fluixel.website import create_app
+        from fluixer.website import create_app
         for changes in [{'FLUIXER_PASSWORD':''},{'FLUIXER_ORIGIN':'http://fluixer.example'},{'FLUIXER_ORIGIN':'https://fluixer.example/path'}]:
             with self.assertRaises(ValueError):create_app({**self.config,**changes})
         self.assertEqual(self.client.get('/healthz',base_url=self.base).json,{'status':'ok'})
@@ -36,9 +36,9 @@ class WebsiteTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/display',base_url=self.base,headers=self.headers,json=[]).status_code,400)
         self.assertEqual(self.client.post('/api/display',base_url=self.base,headers=self.headers,data='x'*(4*1024*1024+1),content_type='application/json').status_code,413)
     def test_core_and_export(self):
-        from fluixel.webapp import preview,csv_payload
-        from fluixel.pipeline import CylinderSettings
-        from fluixel.compensation import curve_settings
+        from fluixer.webapp import preview,csv_payload
+        from fluixer.pipeline import CylinderSettings
+        from fluixer.compensation import curve_settings
         data={'calibration':'compensated','pattern':{'type':'spatial-brush','windows':[[.1,.2]]}}
         r=self.client.post('/api/display',base_url=self.base,headers=self.headers,json=data)
         self.assertEqual(r.status_code,200)
@@ -58,7 +58,7 @@ class WebsiteTests(unittest.TestCase):
         entered,release=threading.Event(),threading.Event()
         def slow(*args):
             entered.set();release.wait(5);return {'ok':True}
-        with patch('fluixel.website.preview',slow):
+        with patch('fluixer.website.preview',slow):
             t=threading.Thread(target=lambda:self.app.test_client().post('/api/display',base_url=self.base,headers=self.headers,json={}))
             t.start()
             try:

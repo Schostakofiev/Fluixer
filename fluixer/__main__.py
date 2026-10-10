@@ -1,4 +1,4 @@
-"""python -m fluixel boundary.csv output.csv --unit steps"""
+"""python -m fluixer boundary.csv output.csv --unit steps"""
 import argparse
 import csv
 from pathlib import Path

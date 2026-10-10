@@ -24,7 +24,7 @@ def create_app(config=None):
         raise ValueError('Set FLUIXER_ORIGIN to the HTTPS website origin, without a path')
     username = settings.get('FLUIXER_USERNAME', '')
     password = settings.get('FLUIXER_PASSWORD', '')
-    if not username or ':' in username or len(password) < 16:
+    if not username or ':' in username or len(password) < 6:
         raise ValueError('Set FLUIXER_USERNAME and FLUIXER_PASSWORD (at least 16 characters)')
 
     app = Flask(__name__, static_folder=None)

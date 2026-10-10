@@ -1,0 +1,11 @@
+**
+!Dockerfile
+!requirements-web.txt
+!VERSION
+!fluixer/
+!fluixer/**
+!vendor/
+!vendor/models/
+!vendor/models/**
+**/__pycache__/**
+**/*.pyc

@@ -1,4 +1,4 @@
-"""python -m fluixel.run_display output.csv --calibration compensated"""
+"""python -m fluixer.run_display output.csv --calibration compensated"""
 import argparse
 from pathlib import Path
 from .pipeline import simulate_captured_s
