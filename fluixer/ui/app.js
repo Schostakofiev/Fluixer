@@ -1,3 +1,4 @@
+let importedCsv = null, csvReadId = 0, csvReading = false;
 let spatialWindows = [],
   spatialUndo = [],
   spatialErase = false,
@@ -78,6 +79,7 @@ $('pre-add').addEventListener('input', () => {
   } catch {}
 });
 function syncPlayback() {
+  syncCsvControls();
   syncSpatialControls();
   const play = $('playback-play');
   play.classList.toggle('is-playing', animationPlaying);
@@ -89,7 +91,7 @@ function syncPlayback() {
     'playback-progress',
     'playback-rate',
   ])
-    $(id).disabled = !display || projectBusy || previewLoading;
+    $(id).disabled = !display || projectBusy || previewLoading || csvReading;
   $('playback-progress').value = Math.round(animationProgress * 1000);
   syncSliderFill($('playback-progress'));
   $('playback-progress').ariaValueText = Math.round(animationProgress * 100) + '%';
@@ -101,6 +103,95 @@ function resetAnimation() {
   motionSource = null;
   syncPlayback();
 }
+// CSV_PREVIEW_CORE_START
+function parsePreviewCsv(source, settings) {
+  if (typeof source !== 'string' || source.length > 4194304)
+    throw Error('CSV exceeds the 4 MB limit');
+  const kGas = Math.trunc(Number(settings.kGas)),
+    kLiquid = Math.trunc(Number(settings.kLiquid)),
+    preAdd = Number(settings.preAdd);
+  if (![kGas, kLiquid].every(v => Number.isFinite(v) && v > 0))
+    throw Error('k_Gas and k_Liquid must be at least 1 for CSV preview');
+  if (!Number.isFinite(preAdd) || preAdd < 0 || preAdd > 10000)
+    throw Error('Pre-Add must be between 0 and 10000 mm');
+  const text = source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const rows = [];
+  let row = [], field = '', quoted = false, closed = false, line = 1, rowLine = 1;
+  const finishField = () => { row.push(field.trim()); field = ''; closed = false; };
+  const finishRow = () => {
+    finishField();
+    if (row.some(v => v !== '')) rows.push({ values: row, line: rowLine });
+    row = [];
+    if (rows.length > 10001) throw Error('CSV exceeds the 10000 command limit');
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else { quoted = false; closed = true; }
+      } else {
+        field += ch;
+        if (ch === '\n') line++;
+      }
+    } else if (ch === ',') finishField();
+    else if (ch === '\n') { finishRow(); rowLine = ++line; }
+    else if (ch === '"' && !field.trim() && !closed) { field = ''; quoted = true; }
+    else if (ch === '"' || (closed && !/\s/.test(ch))) throw Error(`Line ${line}: invalid CSV quoting`);
+    else field += ch;
+  }
+  if (quoted) throw Error(`Line ${rowLine}: unclosed quoted field`);
+  if (field || row.length || closed) finishRow();
+  const header = ['type', 'motor', 'direction', 'steps', 'speed', 'unit', 'seconds'];
+  if (!rows.length || rows[0].values.map(v => v.toLowerCase()).join(',') !== header.join(','))
+    throw Error('Expected CSV header: ' + header.join(','));
+  if (rows.length < 2) throw Error('CSV contains no commands');
+  const commands = [], units = new Set();
+  let total = 0;
+  const number = (raw, name, line) => {
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw) || !Number.isFinite(Number(raw)))
+      throw Error(`Line ${line}: invalid ${name}`);
+    return Number(raw);
+  };
+  for (const { values, line } of rows.slice(1)) {
+    if (values.length !== 7) throw Error(`Line ${line}: expected 7 columns`);
+    const [type, motor, direction, value, speed, unit, seconds] = values.map(v => v.toLowerCase());
+    if (type !== 'move' || !['g', 'l'].includes(motor) || direction !== 'fwd')
+      throw Error(`Line ${line}: only move, g/l and fwd commands are supported`);
+    if (!['steps', 'segments'].includes(unit)) throw Error(`Line ${line}: invalid unit`);
+    const amount = number(value, 'command value', line);
+    number(speed, 'speed', line);
+    if (amount <= 0 || amount > 1e9 || (unit === 'segments' && !Number.isInteger(amount)))
+      throw Error(`Line ${line}: invalid command value`);
+    if (seconds !== '' && number(seconds, 'seconds', line) !== 0)
+      throw Error(`Line ${line}: timed commands are not supported`);
+    const steps = unit === 'segments' ? amount * 200 / 3 : amount;
+    const length = steps * 625 / (motor === 'g' ? kGas : kLiquid) * 9.65 / 100;
+    total += length;
+    if (!Number.isFinite(total) || total > 1e8) throw Error('CSV sequence is too long');
+    const phase = motor === 'g' ? 'gas' : 'liquid';
+    if (commands.length && commands[commands.length - 1].phase === phase)
+      commands[commands.length - 1].length += length;
+    else commands.push({ phase, length });
+    units.add(unit);
+  }
+  return { commands, total, preAdd, kGas, kLiquid, rows: rows.length - 1, approximate: units.has('segments') };
+}
+function csvPreviewWindows(sequence, pathLength, progress) {
+  const pumped = Math.max(0, Math.min(1, progress)) * sequence.total;
+  const windows = [];
+  let injected = 0;
+  for (const command of sequence.commands) {
+    const start = Math.max(0, pumped - injected - command.length - sequence.preAdd);
+    const end = Math.min(pathLength, pumped - injected - sequence.preAdd);
+    if (command.phase === 'liquid' && end > start) windows.push([start, end]);
+    injected += command.length;
+  }
+  // Injection order is opposite to increasing distance along the tube.
+  return windows.reverse();
+}
+// CSV_PREVIEW_CORE_END
+
 function movingWindows(segments, length, progress) {
   // Injection order is reversed: the last liquid in the final path enters first.
   // Start with its leading boundary at the inlet, skipping terminal gas only.
@@ -146,7 +237,7 @@ function motionGeometry(data) {
   return edges;
 }
 function animatedSegments(data, progress) {
-  if (progress >= 1) return data.segments;
+  if (!importedCsv && progress >= 1) return data.segments;
   if (motionSource !== data) {
     motionCache = motionGeometry(data);
     motionSource = data;
@@ -155,7 +246,10 @@ function animatedSegments(data, progress) {
   const interpolate = (edge, d) =>
     edge.a.map((v, j) => v + ((edge.b[j] - v) * (d - edge.start)) / (edge.end - edge.start));
   let cursor = 0;
-  for (const [start, end] of movingWindows(data.segments, data.path_length, progress)) {
+  const windows = importedCsv
+    ? csvPreviewWindows(importedCsv, data.path_length, progress)
+    : movingWindows(data.segments, data.path_length, progress);
+  for (const [start, end] of windows) {
     while (cursor < motionCache.length && motionCache[cursor].end <= start) cursor++;
     for (let i = cursor; i < motionCache.length && motionCache[i].start < end; i++) {
       const edge = motionCache[i],
@@ -1314,12 +1408,6 @@ function setCurve(c) {
   if (selectedPoint >= c.x.length) selectedPoint = null;
   drawCurve(c);
 }
-function pointButtons(c) {
-  $('curve-selection').textContent =
-    c.x.length +
-    ' control points' +
-    (selectedPoint === null ? '' : ' · Selected P' + selectedPoint);
-}
 function bezierCoordinate(values, t) {
   let v = [...values];
   while (v.length > 1) v = v.slice(0, -1).map((a, i) => (1 - t) * a + t * v[i + 1]);
@@ -1327,7 +1415,6 @@ function bezierCoordinate(values, t) {
 }
 
 function drawCurve(c) {
-  pointButtons(c);
   const canvas = $('curve-preview'),
     g = canvas.getContext('2d'),
     w = 280,
@@ -1343,6 +1430,9 @@ function drawCurve(c) {
   canvas.height = side;
   g.setTransform(side / 280, 0, 0, side / 280, 0, 0);
   g.clearRect(0, 0, w, h);
+  // Rotate only the editor view; compensation values stay unchanged.
+  g.translate(w, 0);
+  g.rotate(Math.PI / 2);
   g.lineWidth = 1;
   g.strokeStyle = uiColor('line', '#E2E2E2');
   for (let i = 0; i <= 4; i++) {
@@ -1379,13 +1469,27 @@ function drawCurve(c) {
     g.beginPath();
     g.arc(px(c.x[i]), py(c.y[i]), i === selectedPoint ? 6 : 3, 0, Math.PI * 2);
     g.fill();
-    g.fillText('P' + i, Math.min(248, px(c.x[i]) + 4), Math.max(12, py(c.y[i]) - 5));
   }
-  g.fillText('0', 24, 272);
-  g.fillText('1', 260, 272);
-  g.fillText('+1', 3, 20);
-  g.fillText('0', 8, 139);
-  g.fillText('-1', 3, 258);
+  // Keep text upright while placing it beside the rotated geometry.
+  g.setTransform(side / 280, 0, 0, side / 280, 0, 0);
+  g.textAlign = 'left';
+  g.textBaseline = 'alphabetic';
+  for (let i = 0; i < c.x.length; i++) {
+    const label = 'P' + i,
+      x = w - py(c.y[i]),
+      y = px(c.x[i]),
+      textWidth = g.measureText(label).width;
+    const labelX = x + 5 + textWidth <= w - 4 ? x + 5 : x - 5 - textWidth;
+    g.fillText(label, Math.max(4, labelX), Math.max(12, y - 5));
+  }
+  g.textAlign = 'center';
+  g.fillText('-1', 24, 16);
+  g.fillText('0', 144, 16);
+  g.fillText('+1', 264, 16);
+  g.textAlign = 'right';
+  g.textBaseline = 'middle';
+  g.fillText('0', 16, 24);
+  g.fillText('1', 16, 264);
 }
 function sameCurve(a, b) {
   return (
@@ -1401,7 +1505,10 @@ let curveDrag = null;
 const curveCanvas = $('curve-preview');
 function curvePosition(e) {
   const r = curveCanvas.getBoundingClientRect();
-  return [((e.clientX - r.left) * 280) / r.width, ((e.clientY - r.top) * 280) / r.height];
+  const screenX = ((e.clientX - r.left) * 280) / r.width;
+  const screenY = ((e.clientY - r.top) * 280) / r.height;
+  // Invert the clockwise view rotation for dragging and click hit testing.
+  return [screenY, 280 - screenX];
 }
 curveCanvas.addEventListener('pointerdown', (e) => {
   if (projectBusy || curveDrag || e.altKey || !e.isPrimary || e.button !== 0) return;
@@ -1561,6 +1668,7 @@ function followTubeResize() {
   placementTube = { ...next };
 }
 function loadDisplay() {
+  if (importedCsv || csvReading) clearCsvPreview();
   followTubeResize();
   ++requestId;
   if (previewLoading) {
@@ -1725,7 +1833,7 @@ canvas.addEventListener('keydown', (e) => {
 new ResizeObserver(draw).observe(canvas);
 $('export-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!display || exporting || previewLoading) return;
+  if (!display || importedCsv || exporting || previewLoading) return;
   exporting = true;
   $('export').disabled = true;
   try {
@@ -2020,6 +2128,7 @@ function restoreProject(project, data) {
     JSON.stringify(project.pattern) !== JSON.stringify(data.pattern_config)
   )
     throw Error('Spatial brush result mismatch');
+  if (importedCsv || csvReading) clearCsvPreview();
   setTube(project.cylinder || DEFAULT_TUBE);
   setCurve(project.compensation || LEGACY_CURVE);
   endDrag();
@@ -2079,6 +2188,7 @@ function restoreProject(project, data) {
   draw();
 }
 $('project-save').addEventListener('click', () => {
+  if (importedCsv) return;
   if (!display || projectBusy || previewLoading) return;
   try {
     if (!$('export-form').reportValidity()) return;
@@ -2178,7 +2288,7 @@ $('project-file').addEventListener('change', async () => {
     projectBusy = false;
     syncPlayback();
     for (const id of controls) $(id).disabled = false;
-    pointButtons(curveState);
+    syncCsvControls();
     tubeAvailability();
     paintBrush();
     $('step-apply').disabled = !stepDraft;
@@ -2875,3 +2985,75 @@ for (const key of ['project', 'pattern', 'tube', 'export']) {
   });
 }
 selectSidebarTab('pattern');
+
+function syncCsvControls() {
+  const busy = projectBusy || previewLoading || exporting || csvReading;
+  $('csv-import').disabled = !display || busy;
+  $('csv-preview-clear').hidden = !importedCsv;
+  $('csv-preview-clear').disabled = busy;
+  $('csv-import').setAttribute('aria-pressed', String(!!importedCsv));
+  if (importedCsv) {
+    $('export').disabled = true;
+    $('project-save').disabled = true;
+  }
+}
+function csvPreviewMetrics() {
+  if (!display) return;
+  $('total').textContent = display.path_length.toFixed(2) + ' mm';
+  if (importedCsv) {
+    const windows = csvPreviewWindows(importedCsv, display.path_length, 1);
+    $('liquid-total').textContent = windows.reduce((s, [a, b]) => s + b - a, 0).toFixed(2) + ' mm';
+    let count = 0, cursor = 0;
+    for (const [a, b] of windows) { if (a > cursor) count++; count++; cursor = b; }
+    if (cursor < display.path_length) count++;
+    $('count').textContent = count;
+  } else {
+    $('liquid-total').textContent = display.liquid_length.toFixed(2) + ' mm';
+    $('count').textContent = display.segments.length;
+  }
+}
+function clearCsvPreview() {
+  ++csvReadId;
+  csvReading = false;
+  importedCsv = null;
+  $('csv-import-status').textContent = '';
+  resetAnimation();
+  csvPreviewMetrics();
+  $('export').disabled = !display || exporting || projectBusy || previewLoading || display.pattern_config?.type === 'empty';
+  $('project-save').disabled = !display || projectBusy || previewLoading || display.pattern_config?.type === 'empty';
+  syncCsvControls();
+}
+$('csv-import').addEventListener('click', () => {
+  if (display && !projectBusy && !previewLoading && !exporting && !csvReading) $('csv-file').click();
+});
+$('csv-file').addEventListener('change', async () => {
+  const file = $('csv-file').files[0];
+  $('csv-file').value = '';
+  if (!file || !display || projectBusy || previewLoading || exporting || csvReading) return;
+  const token = ++csvReadId, sourceDisplay = display, sourceRequest = requestId;
+  csvReading = true;
+  syncCsvControls();
+  $('csv-import-status').textContent = 'Reading CSV…';
+  try {
+    if (file.size > 4194304) throw Error('CSV exceeds the 4 MB limit');
+    const settings = { kGas: $('k-gas').value, kLiquid: $('k-liquid').value, preAdd: selectedPreAdd() };
+    const source = await file.text();
+    if (token !== csvReadId || sourceDisplay !== display || sourceRequest !== requestId || projectBusy) return;
+    const parsed = parsePreviewCsv(source, settings);
+    stopAnimation();
+    importedCsv = parsed;
+    animationProgress = 0;
+    $('csv-import-status').textContent = file.name + (parsed.approximate ? ' · Approximate CSV Preview' : ' · CSV Preview');
+    $('csv-import-status').title = `k_Gas: ${parsed.kGas}; k_Liquid: ${parsed.kLiquid}; Pre-Add: ${parsed.preAdd} mm. Normalized preview timing.`;
+    $('export-status').textContent = '';
+    csvPreviewMetrics();
+    syncPlayback();
+    draw();
+  } catch (error) {
+    if (token === csvReadId) $('csv-import-status').textContent = 'Import failed: ' + error.message;
+  } finally {
+    if (token === csvReadId) { csvReading = false; syncPlayback(); }
+  }
+});
+$('csv-preview-clear').addEventListener('click', () => { clearCsvPreview(); draw(); });
+syncCsvControls();

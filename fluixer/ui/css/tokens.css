@@ -18,7 +18,7 @@
   --f-head:'Geist','Helvetica Neue',Arial,var(--f-cjk); --f-editorial:'Newsreader',Georgia,serif;
   --dotbg:rgba(255,255,255,.48);
   --glass:rgba(16,16,16,.9); --glass-brd:rgba(255,255,255,.09);
-  --r-sm:6px; --r-md:8px; --r-pill:999px; --ease:ease-in-out;
+  --r-sm:999px; --r-md:8px; --r-pill:999px; --ease:ease-in-out;
 }
 [data-theme="light"]{
   --bg:#F2F2F2; --surface:#FFF; --raised:#EDEDED; --line:#E2E2E2; --line-2:#CFCFCF;
