@@ -65,6 +65,7 @@
           aria-labelledby="tab-project"
           hidden
         >
+          <fieldset class="csv-edit-controls">
           <section class="project-tools">
             <h2>Project</h2>
             <div class="pair">
@@ -74,8 +75,10 @@
             <input class="" id="project-file" type="file" accept=".fluixer" hidden />
             <p id="project-status" class="note" role="status">Fluixer-project.fluixer</p>
           </section>
+        </fieldset>
         </div>
         <div id="panel-pattern" class="sidebar-panel" role="tabpanel" aria-labelledby="tab-pattern">
+          <fieldset class="csv-edit-controls">
           <section>
             <h2>Pattern</h2>
             <label for="pattern-type">Pattern Type</label>
@@ -190,6 +193,7 @@
               <option value="surface-flow" disabled>Surface Flow (NA)</option>
             </select>
           </section>
+        </fieldset>
         </div>
         <div
           id="panel-tube"
@@ -198,6 +202,7 @@
           aria-labelledby="tab-tube"
           hidden
         >
+          <fieldset class="csv-tube-controls">
           <section>
             <div class="sidebar-section-heading">
               <h2>Tube</h2>
@@ -283,6 +288,7 @@
                 </div>
               </div>
             </div>
+            <fieldset class="csv-edit-controls">
             <div class="pair">
               <div>
                 <label for="tube-inner">Inner Diameter (mm)</label>
@@ -333,6 +339,7 @@
                 </div>
               </div>
             </div>
+            </fieldset>
             <div id="tube-wind-field">
               <label id="tube-wind-label" for="tube-wind">Windings</label>
               <div class="slider-number-row">
@@ -360,6 +367,7 @@
             <p id="tube-render-error" role="status"></p>
           </section>
           <section id="geometry-compensation">
+            <fieldset class="csv-edit-controls">
             <div class="sidebar-section-heading">
               <h2>Geometric Compensation</h2>
               <button
@@ -392,7 +400,9 @@
               value="40"
             />
             <p class="note" id="curve-status"></p>
+            </fieldset>
           </section>
+        </fieldset>
         </div>
         <div
           id="panel-export"
@@ -402,6 +412,7 @@
           hidden
         >
           <form id="export-form">
+          <fieldset class="csv-edit-controls">
             <h2>CSV Export</h2>
             <label for="pre-add">Pre-Add (mm)</label>
             <div class="slider-number-row">
@@ -456,12 +467,13 @@
               <span>↓</span>
             </button>
             <p id="export-status" class="note" role="status"></p>
-          </form>
+          </fieldset>
+        </form>
           <section class="csv-import-tools">
             <h2>CSV Import</h2>
             <div class="csv-import-actions">
               <button class="btn btn-outline" id="csv-import" type="button" aria-pressed="false" disabled>Import CSV</button>
-              <button class="btn btn-outline" id="csv-preview-clear" type="button" hidden>Pattern Preview</button>
+              <button class="btn btn-outline" id="csv-preview-clear" type="button" hidden>Exit CSV Preview</button>
             </div>
             <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
             <p class="note" id="csv-import-status" role="status"></p>

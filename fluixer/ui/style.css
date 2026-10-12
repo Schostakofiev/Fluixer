@@ -28,8 +28,8 @@ header {
 main {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  max-width: 1600px;
-  margin: auto;
+  max-width: auto;
+  margin: 0;
   min-height: calc(100vh - 80px);
 }
 aside {
@@ -841,7 +841,7 @@ aside {
 #geometry-compensation button,
 #geometry-compensation p {
   grid-column: 1;
-  margin: 0;
+  margin: 8px 0 0 0;
 }
 #geometry-compensation #curve-status:empty {
   display: none;
@@ -920,8 +920,17 @@ aside {
 }
 
 /* CSV import preview controls. */
-.sidebar-panel .csv-import-tools {
+#panel-export .csv-import-tools {
+  margin-top: 16px;
   margin-bottom: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+@media (max-height: 760px) {
+  #panel-export .csv-import-tools {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
 }
 .csv-import-actions {
   display: flex;
@@ -930,4 +939,17 @@ aside {
 }
 .csv-import-actions [hidden] {
   display: none;
+}
+
+/* Preserve the layout while CSV preview temporarily locks editing. */
+.csv-edit-controls,
+.csv-tube-controls {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.csv-edit-controls:disabled,
+.csv-tube-controls:disabled {
+  opacity: 0.4;
 }

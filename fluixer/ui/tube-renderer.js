@@ -34,23 +34,36 @@ class Renderer{
   gl.attachShader(p,shader(gl.VERTEX_SHADER,`attribute vec3 position;attribute vec3 normal;uniform vec3 center,right,up,back;uniform vec2 scale,pan;uniform float depth;varying vec3 n;void main(){vec3 q=position-center;gl_Position=vec4(dot(q,right)*scale.x+pan.x,dot(q,up)*scale.y+pan.y,-dot(q,back)/depth,1.0);n=normal;}`));
   gl.attachShader(p,shader(gl.FRAGMENT_SHADER,`precision mediump float;varying vec3 n;uniform vec4 color;void main(){float light=dot(normalize(n),normalize(vec3(-.4,-.6,1.0)));float shade=light>.45?1.0:(light>-.25?.84:.66);gl_FragColor=vec4(color.rgb*shade,color.a);}`));
   gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));
-  this.buffer=gl.createBuffer();this.cache=null;
+  this.wallBuffer=gl.createBuffer();this.liquidBuffer=gl.createBuffer();this.cache=null;
+  this.uniforms=Object.fromEntries(['center','right','up','back','scale','pan','depth','color'].map(name=>[name,gl.getUniformLocation(p,name)]));
+  this.attributes=[['position',0],['normal',12]].map(([name,offset])=>[gl.getAttribLocation(p,name),offset]);
  }
  draw(data,segments,inner,frame,basis,scale,pan,rect,ratio){
-  const gl=this.gl;this.canvas.width=Math.round(rect.width*ratio);this.canvas.height=Math.round(rect.height*ratio);gl.viewport(0,0,this.canvas.width,this.canvas.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(this.program);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);
-  const uniform=(name)=>gl.getUniformLocation(this.program,name);
+  const gl=this.gl;const width=Math.round(rect.width*ratio),height=Math.round(rect.height*ratio);if(this.canvas.width!==width)this.canvas.width=width;if(this.canvas.height!==height)this.canvas.height=height;gl.viewport(0,0,this.canvas.width,this.canvas.height);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(this.program);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);
+  const uniform=(name)=>this.uniforms[name];
   for(const [name,v] of Object.entries({center:frame.center,right:basis.right,up:basis.up,back:basis.back}))gl.uniform3fv(uniform(name),v);
   gl.uniform2f(uniform('scale'),2*scale/rect.width,2*scale/rect.height);gl.uniform2f(uniform('pan'),2*pan[0]/rect.width,-2*pan[1]/rect.height);gl.uniform1f(uniform('depth'),Math.max(frame.extent*4,1));
-  if(this.cache!==data||this.inner!==inner){
+  const geometryChanged=this.cache!==data||this.inner!==inner;
+  if(geometryChanged){
    const points=[];for(const s of data.segments)points.push(...s.points);
-   this.wall=mesh(points,data.cylinder.diameter/2,inner/2);this.cache=data;this.inner=inner;
+   const wall=mesh(points,data.cylinder.diameter/2,inner/2);
+   this.wallCount=wall.length/6;this.cache=data;this.inner=inner;
+   gl.bindBuffer(gl.ARRAY_BUFFER,this.wallBuffer);gl.bufferData(gl.ARRAY_BUFFER,wall,gl.STATIC_DRAW);
   }
-  gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);
-  for(const [name,offset] of [['position',0],['normal',12]]){const a=gl.getAttribLocation(this.program,name);gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,3,gl.FLOAT,false,24,offset);}
-  const paint=(vertices,color)=>{gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.DYNAMIC_DRAW);gl.uniform4fv(uniform('color'),color);gl.drawArrays(gl.TRIANGLES,0,vertices.length/6);};
-  gl.disable(gl.BLEND);gl.depthMask(true);
-  for(const s of segments)if(s.phase==='liquid')paint(mesh(s.points,inner/2*.997),[.78,.24,.21,1]);
-  gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);paint(this.wall,[.80,.80,.80,.2]);gl.depthMask(true);
+  if(geometryChanged||this.liquidSegments!==segments){
+   const parts=segments.filter(s=>s.phase==='liquid').map(s=>mesh(s.points,inner/2*.997));
+   const vertices=new Float32Array(parts.reduce((n,p)=>n+p.length,0));
+   let offset=0;for(const part of parts){vertices.set(part,offset);offset+=part.length;}
+   this.liquidCount=vertices.length/6;this.liquidSegments=segments;
+   gl.bindBuffer(gl.ARRAY_BUFFER,this.liquidBuffer);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.DYNAMIC_DRAW);
+  }
+  const paint=(buffer,count,color)=>{
+   gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+   for(const [a,offset] of this.attributes){gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,3,gl.FLOAT,false,24,offset);}
+   gl.uniform4fv(uniform('color'),color);gl.drawArrays(gl.TRIANGLES,0,count);
+  };
+  gl.disable(gl.BLEND);gl.depthMask(true);paint(this.liquidBuffer,this.liquidCount,[.78,.24,.21,1]);
+  gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);paint(this.wallBuffer,this.wallCount,[.80,.80,.80,.2]);gl.depthMask(true);
  }
 }
 window.FluixerTubeRenderer=Renderer;window.FluixerTubeMesh=mesh;

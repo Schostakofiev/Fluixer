@@ -1,4 +1,12 @@
 let importedCsv = null, csvReadId = 0, csvReading = false;
+let animatedCache = null, viewDrawFrame = null;
+function requestViewDraw() {
+  if (viewDrawFrame !== null) return;
+  viewDrawFrame = window.requestAnimationFrame(() => {
+    viewDrawFrame = null;
+    draw();
+  });
+}
 let spatialWindows = [],
   spatialUndo = [],
   spatialErase = false,
@@ -237,6 +245,13 @@ function motionGeometry(data) {
   return edges;
 }
 function animatedSegments(data, progress) {
+  if (animatedCache?.data === data && animatedCache.csv === importedCsv && animatedCache.progress === progress)
+    return animatedCache.segments;
+  const segments = computeAnimatedSegments(data, progress);
+  animatedCache = { data, csv: importedCsv, progress, segments };
+  return segments;
+}
+function computeAnimatedSegments(data, progress) {
   if (!importedCsv && progress >= 1) return data.segments;
   if (motionSource !== data) {
     motionCache = motionGeometry(data);
@@ -364,26 +379,36 @@ function modelFrame() {
 function viewScale(w, h) {
   return Math.min(w / 130, h / 120) * zoom * (Math.hypot(84, 75) / modelFrame().extent);
 }
+function createProjector(w, h) {
+  const center = modelFrame().center, basis = cameraBasis(), scale = viewScale(w, h);
+  const cx = w / 2 + panX, cy = h / 2 + panY;
+  return (point) => {
+    const x = point[0] - center[0], y = point[1] - center[1], z = point[2] - center[2];
+    const xx = x * basis.right[0] + y * basis.right[1] + z * basis.right[2];
+    const zz = x * basis.up[0] + y * basis.up[1] + z * basis.up[2];
+    const depth = -(x * basis.back[0] + y * basis.back[1] + z * basis.back[2]);
+    return [cx + xx * scale, cy - zz * scale, depth];
+  };
+}
 function project(point, w, h) {
-  const relative = point.map((v, i) => v - modelFrame().center[i]),
-    basis = cameraBasis();
-  const xx = dot(relative, basis.right),
-    zz = dot(relative, basis.up);
-  // Positive render depth means farther away; it is not the camera Z axis.
-  const depth = -dot(relative, basis.back);
-  const scale = viewScale(w, h);
-  return [w / 2 + panX + xx * scale, h / 2 + panY - zz * scale, depth];
+  return createProjector(w, h)(point);
 }
 function draw() {
+  if (viewDrawFrame !== null) {
+    window.cancelAnimationFrame(viewDrawFrame);
+    viewDrawFrame = null;
+  }
   const rect = canvas.getBoundingClientRect(),
     ratio = window.devicePixelRatio || 1;
-  canvas.width = Math.round(rect.width * ratio);
-  canvas.height = Math.round(rect.height * ratio);
+  const width = Math.round(rect.width * ratio), height = Math.round(rect.height * ratio);
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const projectPoint = createProjector(rect.width, rect.height);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
   // World-axis triad uses the same projection as the geometry, never mirrors data.
   const center = modelFrame().center,
-    origin = project(center, rect.width, rect.height),
+    origin = projectPoint(center),
     anchor = [rect.width - 50, 48];
   ctx.font = canvasFont(10);
   ctx.lineWidth = 1.5;
@@ -392,7 +417,7 @@ function draw() {
     [center.map((v, i) => v + (i === 1 ? 10 : 0)), 'Y', '#55815b'],
     [center.map((v, i) => v + (i === 2 ? 10 : 0)), 'Z', '#47778e'],
   ]) {
-    const end = project(point, rect.width, rect.height),
+    const end = projectPoint(point),
       dx = end[0] - origin[0],
       dy = end[1] - origin[1];
     const scale = viewScale(rect.width, rect.height);
@@ -442,19 +467,20 @@ function draw() {
   const strokes = [];
   for (const segment of animatedSegments(display, animationProgress)) {
     for (let i = 1; i < segment.points.length; i++) {
-      const a = project(segment.points[i - 1], rect.width, rect.height),
-        b = project(segment.points[i], rect.width, rect.height);
+      const a = projectPoint(segment.points[i - 1]),
+        b = projectPoint(segment.points[i]);
       strokes.push({ a, b, depth: (a[2] + b[2]) / 2, phase: segment.phase });
     }
   }
   strokes.sort((a, b) => b.depth - a.depth);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  const liquidColor = uiColor('accent-text', '#C2141C'), gasColor = uiColor('secondary', '#585A5A');
   for (const s of strokes) {
     const near = 1 - Math.max(0, Math.min(1, (s.depth + 50) / 100));
     ctx.globalAlpha = s.phase === 'liquid' ? 0.55 + near * 0.45 : 0.22 + near * 0.48;
     ctx.strokeStyle =
-      s.phase === 'liquid' ? uiColor('accent-text', '#C2141C') : uiColor('secondary', '#585A5A');
+      s.phase === 'liquid' ? liquidColor : gasColor;
     ctx.lineWidth = (s.phase === 'liquid' ? 3.8 : 2.2) * Math.min(zoom, 1.6);
     ctx.beginPath();
     ctx.moveTo(s.a[0], s.a[1]);
@@ -685,14 +711,15 @@ for (const n of tubeNames) {
   $('tube-slider-' + n).addEventListener('change', loadDisplay);
 }
 $('tube-reset').addEventListener('click', () => {
-  innerDiameter = 2;
+  const csvDiameter = importedCsv ? Number($('tube-diameter').value) : null;
+  if (!importedCsv) innerDiameter = 2;
   const type = $('tube-type').value,
     mapping = $('mapping-type').value;
   if (type === 'custom-step') {
     tubeStepReverse = false;
     $('tube-step-reverse').ariaPressed = 'false';
-    $('tube-diameter').value = 4;
-    $('tube-slider-diameter').value = 4;
+    $('tube-diameter').value = csvDiameter ?? 4;
+    $('tube-slider-diameter').value = csvDiameter ?? 4;
     loadDisplay();
     return;
   }
@@ -704,6 +731,7 @@ $('tube-reset').addEventListener('click', () => {
       (display?.bounds ? display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2) : null);
   setTube({
     ...DEFAULT_TUBE,
+    ...(csvDiameter !== null ? { diameter: csvDiameter } : {}),
     placement: savedPlane,
     initial_placement: savedInitial,
     ...(center ? { center } : {}),
@@ -1668,7 +1696,7 @@ function followTubeResize() {
   placementTube = { ...next };
 }
 function loadDisplay() {
-  if (importedCsv || csvReading) clearCsvPreview();
+  if (csvReading) return;
   followTubeResize();
   ++requestId;
   if (previewLoading) {
@@ -1686,7 +1714,9 @@ function loadDisplay() {
   return previewTask;
 }
 async function renderDisplay(current) {
-  resetAnimation();
+  // Keep the CSV sequence and current progress when changing its preview path.
+  if (importedCsv) stopAnimation();
+  else resetAnimation();
   tubeAvailability();
   const mode = 'compensated';
   $('spatial-fields').hidden = $('pattern-type').value !== 'spatial-brush';
@@ -1730,9 +1760,7 @@ async function renderDisplay(current) {
     )
       throw Error('Spatial brush result mismatch');
     display = data;
-    $('total').textContent = data.path_length.toFixed(2) + ' mm';
-    $('liquid-total').textContent = data.liquid_length.toFixed(2) + ' mm';
-    $('count').textContent = data.segments.length;
+    csvPreviewMetrics();
     const pending = current !== requestId;
     status('', false, pending);
     $('export').disabled = exporting || pending || requestedPattern.type === 'empty';
@@ -1792,7 +1820,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   dragging.x = e.clientX;
   dragging.y = e.clientY;
-  draw();
+  requestViewDraw();
 });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture'])
   canvas.addEventListener(name, endDrag);
@@ -1812,7 +1840,7 @@ canvas.addEventListener(
         zoom * Math.exp(-e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 500 : 1) * 0.001),
       ),
     );
-    draw();
+    requestViewDraw();
   },
   { passive: false },
 );
@@ -1828,9 +1856,9 @@ canvas.addEventListener('keydown', (e) => {
     yaw += dx * 0.1;
     pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.1));
   }
-  draw();
+  requestViewDraw();
 });
-new ResizeObserver(draw).observe(canvas);
+new ResizeObserver(requestViewDraw).observe(canvas);
 $('export-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!display || importedCsv || exporting || previewLoading) return;
@@ -2446,7 +2474,7 @@ function drawPlane(rect) {
   planeHandles = [];
   if (!placement || !planeVisible || !display) return;
   const c = patternFrame(display.cylinder),
-    screen = (p) => project(p, rect.width, rect.height),
+    screen = createProjector(rect.width, rect.height),
     corners = [
       [0, 0],
       [2 * c.radius, 0],
@@ -2596,8 +2624,9 @@ function syncPlaneTools() {
     ['tool-direction', 'direction'],
   ]) {
     $(id).ariaPressed = String(!!placement && planeVisible && $('plane-tool').value === mode);
-    $(id).disabled = projectBusy;
+    $(id).disabled = projectBusy || !!importedCsv || csvReading;
   }
+  $('plane-reset').disabled = projectBusy || !!importedCsv || csvReading;
   $('plane-toggle').ariaPressed = String(!!placement && planeVisible);
 }
 for (const [id, mode] of [
@@ -2605,7 +2634,7 @@ for (const [id, mode] of [
   ['tool-direction', 'direction'],
 ])
   $(id).addEventListener('click', () => {
-    if (projectBusy) return;
+    if (projectBusy || importedCsv || csvReading) return;
     planeVisible = true;
     $('plane-tool').value = mode;
     syncPlaneTools();
@@ -2617,6 +2646,7 @@ $('plane-toggle').addEventListener('click', () => {
   draw();
 });
 $('plane-reset').addEventListener('click', () => {
+  if (projectBusy || importedCsv || csvReading) return;
   placement = clonePlane(initialPlacement);
   loadDisplay();
 });
@@ -2629,6 +2659,8 @@ canvas.addEventListener(
       e.button !== 0 ||
       !placement ||
       !planeVisible ||
+      importedCsv ||
+      csvReading ||
       projectBusy
     )
       return;
@@ -2856,6 +2888,8 @@ canvas.addEventListener(
     if (
       e.button !== 0 ||
       $('pattern-type').value !== 'spatial-brush' ||
+      importedCsv ||
+      csvReading ||
       !display ||
       projectBusy ||
       previewLoading
@@ -2987,6 +3021,18 @@ for (const key of ['project', 'pattern', 'tube', 'export']) {
 selectSidebarTab('pattern');
 
 function syncCsvControls() {
+  // A disabled fieldset preserves each control's own enabled/disabled state.
+  // Inert also locks canvas editors and prevents keyboard focus while previewing.
+  const locked = !!importedCsv || csvReading;
+  for (const group of document.querySelectorAll('.csv-edit-controls')) {
+    group.disabled = locked;
+    group.inert = locked;
+  }
+  for (const group of document.querySelectorAll('.csv-tube-controls')) {
+    group.disabled = projectBusy || csvReading;
+    group.inert = group.disabled;
+  }
+  syncPlaneTools();
   const busy = projectBusy || previewLoading || exporting || csvReading;
   $('csv-import').disabled = !display || busy;
   $('csv-preview-clear').hidden = !importedCsv;
@@ -3017,6 +3063,7 @@ function clearCsvPreview() {
   csvReading = false;
   importedCsv = null;
   $('csv-import-status').textContent = '';
+  $('csv-import-status').removeAttribute('title');
   resetAnimation();
   csvPreviewMetrics();
   $('export').disabled = !display || exporting || projectBusy || previewLoading || display.pattern_config?.type === 'empty';
@@ -3042,6 +3089,7 @@ $('csv-file').addEventListener('change', async () => {
     const parsed = parsePreviewCsv(source, settings);
     stopAnimation();
     importedCsv = parsed;
+    selectSidebarTab('export');
     animationProgress = 0;
     $('csv-import-status').textContent = file.name + (parsed.approximate ? ' · Approximate CSV Preview' : ' · CSV Preview');
     $('csv-import-status').title = `k_Gas: ${parsed.kGas}; k_Liquid: ${parsed.kLiquid}; Pre-Add: ${parsed.preAdd} mm. Normalized preview timing.`;
