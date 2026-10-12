@@ -40,11 +40,11 @@ Install requirements-web.txt, then run:
 python -m unittest discover -s tests -p test_website.py
 
 Where Docker is available:
-docker build -t fluixer:0.2.0-web .
+docker build -t fluixer:0.2.1-web .
 
 After deployment, verify authentication for / and /api/display, S/Cylinder/Hilbert,
 STEP pattern and tube imports, image recognition, spatial brush, project reload,
-and CSV agreement with local 0.2.0. Measure memory usage and two-client behavior.
+and CSV agreement with local 0.2.1. Measure memory usage and two-client behavior.
 Linux Docker build and Render smoke checks are still required before launch.
 
 The container installs Linux libraries and copies only the model from vendor.

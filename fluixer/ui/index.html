@@ -401,15 +401,6 @@
           aria-labelledby="tab-export"
           hidden
         >
-          <section class="csv-import-tools">
-            <h2>CSV Import</h2>
-            <div class="csv-import-actions">
-              <button class="btn btn-outline" id="csv-import" type="button" aria-pressed="false" disabled>Import CSV</button>
-              <button class="btn btn-outline" id="csv-preview-clear" type="button" hidden>Pattern Preview</button>
-            </div>
-            <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
-            <p class="note" id="csv-import-status" role="status"></p>
-          </section>
           <form id="export-form">
             <h2>CSV Export</h2>
             <label for="pre-add">Pre-Add (mm)</label>
@@ -466,6 +457,16 @@
             </button>
             <p id="export-status" class="note" role="status"></p>
           </form>
+          <section class="csv-import-tools">
+            <h2>CSV Import</h2>
+            <div class="csv-import-actions">
+              <button class="btn btn-outline" id="csv-import" type="button" aria-pressed="false" disabled>Import CSV</button>
+              <button class="btn btn-outline" id="csv-preview-clear" type="button" hidden>Pattern Preview</button>
+            </div>
+            <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
+            <p class="note" id="csv-import-status" role="status"></p>
+          </section>
+
         </div>
       </aside>
       <article>

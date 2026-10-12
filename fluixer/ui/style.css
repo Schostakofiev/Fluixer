@@ -878,10 +878,10 @@ aside {
   margin: 0;
 }
 .sidebar-section-heading .sidebar-reset {
-  flex: 0 0 28px;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
   padding: 0;
   margin: 0;
   border-radius: var(--r-sm);
