@@ -11,10 +11,9 @@ from pathlib import Path
 import threading
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
-from .pipeline import path_bounds,pattern_frame,rectangle_settings,simulate_along_path,cylinder_settings,cylinder_config,CylinderSettings
+from .pipeline import path_bounds,pattern_frame,pattern_bounds,simulate_along_path,cylinder_settings,cylinder_config,CylinderSettings
 from .geometry import UpwardSemicircle, CircularArc
 from .compensation import curve_settings, curve_config
-from .svg_input import parse_svg
 from .step_input import parse_step
 from .tube_step import parse_tube_step
 from .brush_input import parse_brush
@@ -32,23 +31,21 @@ def pattern_key(value=None,cylinder=CylinderSettings()):
         from .spatial_brush import validate_windows
         if set(value)!={'type','windows'}:raise ValueError('Invalid spatial brush parameters')
         return ('spatial-brush',validate_windows(value['windows']))
-    if isinstance(value,dict) and value.get('type') in ('svg','step','brush','image'):
-        if set(value)!={'type','source','width','height','x','z'}:raise ValueError('Incomplete SVG pattern parameters')
-        ({'step':parse_step,'svg':parse_svg,'brush':parse_brush,'image':parse_brush}[value['type']])(value['source'])
-        return (value['type'],value['source'],*rectangle_settings(*(value[n] for n in ('width','height','x','z')),cylinder=cylinder))
-    if not isinstance(value,dict) or set(value)!={'type','width','height','x','z'} or value['type']!='rectangle':
-        raise ValueError('Invalid pattern settings')
-    return rectangle_settings(*(value[n] for n in ('width','height','x','z')),cylinder=cylinder)
+    if isinstance(value,dict) and value.get('type') in ('step','brush','image'):
+        if set(value)!={'type','source','width','height','x','z'}:raise ValueError('Incomplete pattern parameters')
+        ({'step':parse_step,'brush':parse_brush,'image':parse_brush}[value['type']])(value['source'])
+        return (value['type'],value['source'],*pattern_bounds(*(value[n] for n in ('width','height','x','z')),cylinder=cylinder))
+    raise ValueError('Unsupported pattern type')
 
 
 @lru_cache(maxsize=8)
-def solved(mode,pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
-    return simulate_along_path(pattern,mode,curve,cylinder)
+def solved(pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
+    return simulate_along_path(pattern,curve,cylinder)
 
 
 @lru_cache(maxsize=8)
-def preview(mode,pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
-    display=solved(mode,pattern,curve,cylinder)
+def preview(pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
+    display=solved(pattern,curve,cylinder)
     # Tessellation is display-only. CSV continues to use exact physical lengths.
     samples=[(0.0,display.path.pieces[0].point_at(0))]
     distance=0.0
@@ -80,31 +77,31 @@ def preview(mode,pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
                     inside=col<256 and region.contains(((col+.5)*2*frame.radius/256,z))
                     if inside and start is None:start=col*2*frame.radius/256
                     if not inside and start is not None:plane.append([start,z,col*2*frame.radius/256,z]);start=None
-    return {'bounds':[list(p) for p in path_bounds(display.path)],'plane':plane,'cylinder':cylinder_config(cylinder),'compensation':curve_config(curve),'calibration':mode,'pattern':'Empty tube' if pattern==('empty',) else 'Image pattern' if pattern and pattern[0]=='image' else 'Brush pattern' if pattern and pattern[0]=='brush' else 'STEP region' if pattern and pattern[0]=='step' else 'SVG pattern' if pattern and pattern[0]=='svg' else 'Custom rectangle' if pattern else 'S · Full outline',
-        'pattern_config':{'type':'spatial-brush','windows':[list(w) for w in pattern[1]]} if pattern and pattern[0]=='spatial-brush' else {'type':'empty'} if pattern==('empty',) else dict(type=pattern[0],source=pattern[1],**dict(zip(('width','height','x','z'),pattern[2:]))) if pattern and pattern[0] in ('svg','step','brush','image') else dict(type='rectangle',**dict(zip(('width','height','x','z'),pattern))) if pattern else {'type':'captured-s'},'length_unit':'mm',
+    return {'bounds':[list(p) for p in path_bounds(display.path)],'plane':plane,'cylinder':cylinder_config(cylinder),'compensation':curve_config(curve),'pattern':'Empty tube' if pattern==('empty',) else 'Image pattern' if pattern and pattern[0]=='image' else 'Brush pattern' if pattern and pattern[0]=='brush' else 'STEP region' if pattern and pattern[0]=='step' else 'Spatial brush' if pattern and pattern[0]=='spatial-brush' else 'S · Full outline',
+        'pattern_config':{'type':'spatial-brush','windows':[list(w) for w in pattern[1]]} if pattern and pattern[0]=='spatial-brush' else {'type':'empty'} if pattern==('empty',) else dict(type=pattern[0],source=pattern[1],**dict(zip(('width','height','x','z'),pattern[2:]))) if pattern and pattern[0] in ('step','brush','image') else {'type':'captured-s'},'length_unit':'mm',
         'path_length':display.path.length,'segments':segments,
         'liquid_length':sum(s.length for s in display.sequence.segments if s.phase=='liquid'),
         'contours':[[c.start,c.end] for c in display.contours]}
 
 
 def csv_payload(data):
-    allowed={'calibration','speed','k_gas','k_liquid','unit','pattern','compensation','cylinder','pre_add'}
+    allowed={'speed','k_gas','k_liquid','unit','pattern','compensation','cylinder','pre_add','length_per_100_steps'}
     if not isinstance(data,dict) or set(data)-allowed:raise ValueError('Unknown export parameters')
     from .geometry import finite
     pre_add=finite(data.get('pre_add',730),'Pre-Add')
     if isinstance(data.get('pre_add'),bool) or not 0<=pre_add<=10000:raise ValueError('Pre-Add must be between 0 and 10000 mm')
-    mode=data.get('calibration','original')
-    if mode not in ('original','compensated'):raise ValueError('Invalid compensation mode')
+    step_length=finite(data.get('length_per_100_steps',9.65),'100 Steps Length')
+    if isinstance(data.get('length_per_100_steps'),bool) or step_length<=0:raise ValueError('100 Steps Length must be a positive number in mm')
     unit=data.get('unit','steps')
     if unit not in ('steps','segments'):raise ValueError('Invalid output unit')
     machine=MachineParameters(*(float(data.get(key,default)) for key,default in
         [('speed',400),('k_gas',606),('k_liquid',625)]))
     cylinder=cylinder_settings(data.get('cylinder'))
     pattern=pattern_key(data.get('pattern'),cylinder)
-    rows=display_rows(solved(mode,pattern,curve_settings(data.get('compensation')),cylinder),machine=machine,unit=unit,pre_add=pre_add)
+    rows=display_rows(solved(pattern,curve_settings(data.get('compensation')),cylinder),machine=machine,unit=unit,pre_add=pre_add,length_per_100_steps=step_length)
     stream=io.StringIO(newline='')
     writer=csv.writer(stream);writer.writerow(HEADER);writer.writerows(rows)
-    return stream.getvalue().encode('utf-8-sig'),f'fluixel_{mode}_{unit}.csv',len(rows)
+    return stream.getvalue().encode('utf-8-sig'),f'fluixer_{unit}.csv',len(rows)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,23 +142,22 @@ class Handler(BaseHTTPRequestHandler):
             if name=='index.html':body=body.replace(b'{{VERSION}}',escape(__version__).encode('utf-8'))
             self.send(200,body,mime+'; charset=utf-8')
         elif url.path=='/api/display':
-            mode=parse_qs(url.query).get('calibration',['original'])[0]
-            if mode not in ('original','compensated'):self.error(400,'Invalid compensation mode');return
             try:
                 params=parse_qs(url.query)
+                if set(params)-{'pattern','width','height','x','z','compensation','cylinder'}:raise ValueError('Unknown preview parameters')
                 config=None
                 if params.get('pattern',['captured-s'])[0]!='captured-s':
                     config={'type':params['pattern'][0],**{n:params.get(n,[''])[0] for n in ('width','height','x','z')}}
                 curve=curve_settings(json.loads(params['compensation'][0]) if 'compensation' in params else None)
                 cylinder=cylinder_settings(json.loads(params['cylinder'][0]) if 'cylinder' in params else None)
-                with _lock:payload=preview(mode,pattern_key(config,cylinder),curve,cylinder)
+                with _lock:payload=preview(pattern_key(config,cylinder),curve,cylinder)
             except (ValueError,TypeError) as exc:self.error(400,str(exc));return
             self.send(200,json.dumps(payload).encode(),'application/json')
         else:self.error(404,'Page not found')
 
     def do_POST(self):
         if not self.local_request():return
-        if self.path not in ('/api/image','/api/export','/api/svg','/api/step','/api/tube-step','/api/display'):self.error(404,'Endpoint not found');return
+        if self.path not in ('/api/image','/api/export','/api/step','/api/tube-step','/api/display'):self.error(404,'Endpoint not found');return
         try:
             count=int(self.headers.get('Content-Length','0'))
             if not 0<count<=4194304:raise ValueError('Request must not exceed 4 MB')
@@ -170,14 +166,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(data,dict) or set(data)!={'source'}:raise ValueError('Invalid image parameters')
                 from .image_input import photo_subject
                 self.send(200,json.dumps(photo_subject(data['source'])).encode(),'application/json');return
-            if self.path in ('/api/svg','/api/step','/api/tube-step'):
-                if not isinstance(data,dict) or set(data)!={'source'}:raise ValueError('Invalid SVG request parameters')
-                with _lock:payload=({'/api/step':parse_step,'/api/svg':parse_svg,'/api/tube-step':parse_tube_step}[self.path])(data['source'])
+            if self.path in ('/api/step','/api/tube-step'):
+                if not isinstance(data,dict) or set(data)!={'source'}:raise ValueError('Invalid STEP request parameters')
+                with _lock:payload=({'/api/step':parse_step,'/api/tube-step':parse_tube_step}[self.path])(data['source'])
                 self.send(200,json.dumps(payload).encode(),'application/json');return
             if self.path=='/api/display':
-                if not isinstance(data,dict) or set(data)-{'calibration','pattern','compensation','cylinder','pre_add'}:raise ValueError('Invalid preview parameters')
+                if not isinstance(data,dict) or set(data)-{'pattern','compensation','cylinder','pre_add'}:raise ValueError('Invalid preview parameters')
                 cylinder=cylinder_settings(data.get('cylinder'))
-                with _lock:payload=preview(data.get('calibration','compensated'),pattern_key(data.get('pattern'),cylinder),curve_settings(data.get('compensation')),cylinder)
+                with _lock:payload=preview(pattern_key(data.get('pattern'),cylinder),curve_settings(data.get('compensation')),cylinder)
                 self.send(200,json.dumps(payload).encode(),'application/json');return
             with _lock:body,name,rows=csv_payload(data)
         except (ValueError,TypeError,OverflowError) as exc:

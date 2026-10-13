@@ -2,7 +2,7 @@
 import bisect,json,math
 from functools import lru_cache
 from pathlib import Path
-from .pattern import Contour
+
 
 def point(curve,t):
     p=curve['degree'];knots=[curve['knots'][0]]+curve['knots']+[curve['knots'][-1]]
@@ -35,23 +35,3 @@ def boundary():
             xx,zz=value(x,t),value(z,t);dx,dz=derivative(x,t),derivative(z,t)
             area+=w*(xx*dz-zz*dx)/2;mx+=w*xx*xx*dz/2;mz-=w*zz*zz*dx/2
     return tuple(spans),(mx/area,mz/area)
-
-def s_contours(radius=40,height=75,wind=16):
-    spans,center=boundary();dx=radius-center[0];dz=height/2-center[1];result=[]
-    for layer in range(wind+1):
-        level=height*layer/wind;hits=[]
-        for x,z in spans:
-            a,b,c=z[2],z[1],z[0]+dz-level
-            if abs(a)<1e-11:
-                roots=[] if abs(b)<1e-11 else [-c/b]
-            else:
-                disc=b*b-4*a*c
-                roots=[] if disc<=1e-18 else [(-b-math.sqrt(disc))/(2*a),(-b+math.sqrt(disc))/(2*a)]
-            for t in roots:
-                # Half-open per-span interval avoids double-counting shared vertices.
-                if -1e-10<=t<1-1e-10 and abs(derivative(z,t))>1e-9:hits.append(value(x,max(0,t))+dx)
-        hits.sort()
-        if len(hits)%2:raise ValueError('S boundary slice has unmatched intersections')
-        for a,b in zip(hits[::2],hits[1::2]):
-            if b-a>1e-9:result.append(Contour((a,0,level),(b,0,level),layer))
-    return tuple(result)

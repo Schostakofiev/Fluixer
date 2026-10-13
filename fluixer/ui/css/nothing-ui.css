@@ -6,13 +6,6 @@
 html{scroll-behavior:smooth}
 body{background-color:var(--bg);color:var(--primary);font-family:var(--f-mono);font-size:11px;line-height:1.45;
   font-variation-settings:'ROND' 100;-webkit-font-smoothing:antialiased;transition:background-color .35s var(--ease),color .35s var(--ease)}
-/* Sparse dot grid as a LOCAL-INVERSE overlay: a fixed white-dot field with mix-blend-mode:difference,
-   so each dot takes the contrast of the surface BEHIND it — on light surfaces it reads as soft grey,
-   on dark surfaces it reads as light (and vice-versa) — automatically, in BOTH themes, no per-theme color.
-   z-index:-1 keeps it BEHIND all cards (cards are always the top layer and cover the dots). Thin (~1.3px), sparse (120px). */
-body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background-image:radial-gradient(rgba(255,255,255,.42) 1.3px, transparent 1.7px);
-  background-size:120px 120px;background-attachment:fixed;mix-blend-mode:difference}
 ::selection{background:var(--accent);color:var(--accent-ink)}
 .label{font-family:var(--f-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--secondary)}
 .fdisplay{font-family:var(--f-display);color:var(--display)} .fui{font-family:var(--f-ui)} .mono{font-family:var(--f-mono)}

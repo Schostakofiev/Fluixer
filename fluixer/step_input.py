@@ -17,7 +17,7 @@ def kernel():
     if vendor.is_dir() and str(vendor) not in sys.path:sys.path.insert(0,str(vendor))
     try:
         import OCP
-    except (ImportError,OSError) as e:raise ValueError('STEP geometry library is missing. Run Install-Step.ps1 from the installation package') from e
+    except (ImportError,OSError) as e:raise ValueError('STEP geometry library is missing or could not load. In the local project folder, run: python -m pip install --upgrade --target vendor cadquery-ocp==7.9.3.1.1. For the website, rebuild with requirements-web.txt') from e
 
 @lru_cache(maxsize=4)
 def parse_step(source):
@@ -82,7 +82,3 @@ def parse_step(source):
     if min(w,h)<=1e-6:raise ValueError('STEP region has zero size')
     normalized=tuple((rule,tuple(tuple(((x-xmin)/w,(y-ymin)/h) for x,y in ring) for ring in rings)) for rule,rings in groups)
     return {'groups':normalized,'view_box':(0,0,w,h),'point_count':len(points),'ring_count':sum(len(rs) for _,rs in groups),'conversion_notes':['Converted planar regions; boundary tessellation tolerance: 0.01 mm'],'unit':'mm'}
-
-def step_contours(source,width,height,x,z,levels):
-    from .svg_input import groups_contours
-    return groups_contours(parse_step(source)['groups'],width,height,x,z,levels)

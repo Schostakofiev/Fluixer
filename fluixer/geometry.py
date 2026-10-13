@@ -30,13 +30,6 @@ class Line:
     def point_at(self, fraction):
         return tuple(a + (b-a)*fraction for a,b in zip(self.start,self.end))
 
-    def project(self, point):
-        delta = tuple(b-a for a,b in zip(self.start,self.end))
-        t = sum((p-a)*d for p,a,d in zip(point,self.start,delta)) / self.length**2
-        t = min(1.0, max(0.0, t))
-        q = self.point_at(t)
-        return t, q, math.dist(point,q)
-
 
 @dataclass(frozen=True)
 class UpwardSemicircle:
@@ -58,16 +51,6 @@ class UpwardSemicircle:
         angle = math.pi*fraction
         return (x+self.side*self.radius*math.sin(angle),y,z-self.radius*math.cos(angle))
 
-    def project(self, point):
-        px = self.side*(point[0]-self.center[0])
-        pz = point[2]-self.center[2]
-        candidates = [0.0, 1.0]
-        angle = math.atan2(px, -pz)
-        if 0 <= angle <= math.pi:
-            candidates.append(angle/math.pi)
-        result = [(t,self.point_at(t),math.dist(point,self.point_at(t))) for t in candidates]
-        return min(result,key=lambda item:(item[2],item[0]))
-
 
 @dataclass(frozen=True)
 class CircularArc:
@@ -86,14 +69,6 @@ class CircularArc:
         x,y,z = self.center
         return (x+self.radius*math.cos(angle),y,z+self.radius*math.sin(angle))
 
-    def project(self, point):
-        angle = math.atan2(point[2]-self.center[2],point[0]-self.center[0])
-        candidates = [0.0,1.0]
-        for turn in range(-2,3):
-            t = (angle+turn*2*math.pi-self.start_angle)/self.sweep
-            if 0 <= t <= 1: candidates.append(t)
-        return min(((t,self.point_at(t),math.dist(point,self.point_at(t))) for t in candidates),key=lambda v:(v[2],v[0]))
-
 
 def rounded_orthogonal_path(points, radius, length_unit='mm'):
     pieces, previous = [], points[0]
@@ -111,13 +86,6 @@ def rounded_orthogonal_path(points, radius, length_unit='mm'):
         previous=end
     pieces.append(Line(previous,points[-1]))
     return TubePath(tuple(pieces),length_unit)
-
-
-@dataclass(frozen=True)
-class PathProjection:
-    distance_along: float
-    point: Point
-    distance_to_path: float
 
 
 @dataclass(frozen=True)
@@ -158,18 +126,6 @@ class TubePath:
         i = bisect_right(self._ends,distance)
         start = self._ends[i-1] if i else 0.0
         return self.pieces[i].point_at((distance-start)/self.pieces[i].length)
-
-    def project(self, point):
-        point = tuple(finite(p,'point coordinate') for p in point)
-        if len(point) != 3:
-            raise ValueError('point must have three coordinates')
-        results = []
-        start = 0.0
-        for piece in self.pieces:
-            t,q,distance = piece.project(point)
-            results.append(PathProjection(start+t*piece.length,q,distance))
-            start += piece.length
-        return min(results,key=lambda p:(p.distance_to_path,p.distance_along))
 
 
 def s_curve(width=100, height=80, wind=16, *, length_unit='mm'):

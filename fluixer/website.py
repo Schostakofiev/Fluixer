@@ -25,7 +25,7 @@ def create_app(config=None):
     username = settings.get('FLUIXER_USERNAME', '')
     password = settings.get('FLUIXER_PASSWORD', '')
     if not username or ':' in username or len(password) < 6:
-        raise ValueError('Set FLUIXER_USERNAME and FLUIXER_PASSWORD (at least 16 characters)')
+        raise ValueError('Set FLUIXER_USERNAME and FLUIXER_PASSWORD (at least 6 characters)')
 
     app = Flask(__name__, static_folder=None)
     app.config.update(MAX_CONTENT_LENGTH=4*1024*1024)
@@ -85,7 +85,7 @@ def create_app(config=None):
 
     @app.route('/api/<operation>', methods=['GET', 'POST'])
     def api(operation):
-        if operation not in {'display', 'export', 'image', 'step', 'tube-step', 'svg'}:
+        if operation not in {'display', 'export', 'image', 'step', 'tube-step'}:
             return jsonify(error='Endpoint not found'), 404
         if request.method == 'GET' and operation != 'display':
             return jsonify(error='Use POST for this endpoint'), 405
@@ -96,7 +96,9 @@ def create_app(config=None):
         try:
             if request.method == 'GET':
                 args = request.args
-                data = {'calibration': args.get('calibration', 'original')}
+                if set(args) - {'pattern', 'width', 'height', 'x', 'z', 'compensation', 'cylinder'}:
+                    raise ValueError('Unknown preview parameters')
+                data = {}
                 for field in ('cylinder', 'compensation'):
                     if field in args:
                         data[field] = json.loads(args[field])
@@ -111,11 +113,11 @@ def create_app(config=None):
                     body, name, rows = csv_payload(data)
                 return Response(body, content_type='text/csv; charset=utf-8', headers={'Content-Disposition': f'attachment; filename="{name}"', 'X-Row-Count': str(rows)})
             if operation == 'display':
-                if set(data) - {'calibration', 'pattern', 'compensation', 'cylinder', 'pre_add'}:
+                if set(data) - {'pattern', 'compensation', 'cylinder', 'pre_add'}:
                     raise ValueError('Invalid preview parameters')
                 cylinder = cylinder_settings(data.get('cylinder'))
                 with _lock:
-                    result = preview(data.get('calibration', 'compensated'), pattern_key(data.get('pattern'), cylinder), curve_settings(data.get('compensation')), cylinder)
+                    result = preview(pattern_key(data.get('pattern'), cylinder), curve_settings(data.get('compensation')), cylinder)
                 return jsonify(result)
             if set(data) != {'source'}:
                 raise ValueError('Expected a source field')
@@ -124,9 +126,8 @@ def create_app(config=None):
                 return jsonify(photo_subject(data['source']))
             from .step_input import parse_step
             from .tube_step import parse_tube_step
-            from .svg_input import parse_svg
             with _lock:
-                return jsonify({'step': parse_step, 'tube-step': parse_tube_step, 'svg': parse_svg}[operation](data['source']))
+                return jsonify({'step': parse_step, 'tube-step': parse_tube_step}[operation](data['source']))
         except (ValueError, TypeError, OverflowError) as error:
             return jsonify(error=str(error)), 400
         except HTTPException:

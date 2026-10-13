@@ -80,13 +80,11 @@ def region_for(pattern,c):
     if kind in ('brush','image'):
         from .brush_input import parse_brush
         return MaskRegion(parse_brush(pattern[1]),*pattern[2:])
-    if kind in ('step','svg'):
+    if kind=='step':
         from .step_input import parse_step
-        from .svg_input import parse_svg
-        data=(parse_step if kind=='step' else parse_svg)(pattern[1]);w,h,x,z=pattern[2:]
+        data=parse_step(pattern[1]);w,h,x,z=pattern[2:]
         return PolygonRegion(tuple((rule,tuple(tuple((x+a*w,z+b*h) for a,b in ring) for ring in rings)) for rule,rings in data['groups']))
-    w,h,x,z=pattern
-    return PolygonRegion((('nonzero',(((x,z),(x+w,z),(x+w,z+h),(x,z+h)),)),))
+    raise ValueError('Unsupported pattern type')
 
 def along_path(path,region,*,height,curve,front_y=None,projection=None,back_y=None):
     amp,cx,cy=curve

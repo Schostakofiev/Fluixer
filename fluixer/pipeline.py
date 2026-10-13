@@ -1,14 +1,12 @@
-"""Independent simulation entry point, with a deliberately fixed captured S preset.
+"""Along-path simulation for generated and imported tube paths.
 
 No machine parameters or export units enter the simulation result.
 """
 from dataclasses import dataclass, replace
-import json
-from pathlib import Path
 from .cubic import CubicPath, cylinder_spiral
-from .pattern import Contour, project_contours, polygon_contours
+
 from .geometry import finite, s_curve, hilbert_curve, TubePath
-from .compensation import compensate_contours, curve_settings
+
 from .segments import PhysicalSequence
 
 
@@ -38,8 +36,7 @@ def cylinder_settings(value=None):
     kind=value.get('type','cylinder')
     if kind not in ('cylinder','s-curve','hilbert','custom-step'):raise ValueError('Unsupported tube type')
     mapping=value.get('mapping','projection')
-    if mapping not in ('projection','path'):raise ValueError('Invalid mapping method')
-    if mapping=='path':mapping='projection' # Migrate the former algorithm selector.
+    if mapping!='projection':raise ValueError('Invalid mapping method')
     if kind=='hilbert' and wind>6:raise ValueError('Hilbert order must be between 1 and 6')
     source=value.get('source');reverse=value.get('reverse',False)
     if not isinstance(reverse,bool):raise ValueError('Invalid tube direction')
@@ -111,106 +108,20 @@ def tube_path(c):
     return replace(path,pieces=tuple(pieces))
 
 
-def slice_levels(c):
-    rows=c.wind*(2 if c.type=='s-curve' else 1)
-    return [i*c.height/rows for i in range(rows+1)]
-
-
 @dataclass(frozen=True)
 class SolvedDisplay:
     path: CubicPath | TubePath
-    contours: tuple[Contour, ...]
+    contours: tuple[()]  # Empty legacy field retained for API compatibility.
     sequence: PhysicalSequence
-    calibration: str
     pattern_id: str
 
 
-def simulate_captured_s(*, calibration='original', cylinder=CylinderSettings(), compensation=None):
-    """Slice the GH planar S boundary for the selected cylinder, in mm.
-
-    The decoded boundary is centered by its area centroid, then sliced at
-    height/wind spacing. This supports the saved planar S, not arbitrary Breps.
-    """
-    if calibration not in ('original','compensated'):
-        raise ValueError('calibration must be original or compensated')
-    from .s_pattern import s_contours
-    contours=s_contours(cylinder.radius,cylinder.height,cylinder.wind*(2 if cylinder.type=='s-curve' else 1))
-    if not contours:raise ValueError('Tube slices do not intersect the S pattern. Adjust height or windings')
-    curve=curve_settings(compensation)
-    if calibration=='compensated' and curve[0]!=0 and any(curve[2]):
-        contours=compensate_contours(contours,amplitude=curve[0],control_x=curve[1],control_y=curve[2])
-    path=tube_path(cylinder)
-    return SolvedDisplay(path,contours,project_contours(path,contours),calibration,'captured-s-cylinder-20260923')
-
-
-def rectangle_settings(width=30,height=45,x=25,z=15,*,cylinder=CylinderSettings()):
+def pattern_bounds(width=30,height=45,x=25,z=15,*,cylinder=CylinderSettings()):
     values=tuple(finite(v,n) for n,v in [('width',width),('height',height),('x',x),('z',z)])
     width,height,x,z=values
     if width<=0 or height<=0 or x<0 or z<0 or x+width>2*cylinder.radius or z+height>cylinder.height:
-        raise ValueError(f'Rectangle must be within X=0..{2*cylinder.radius:g}, Z=0..{cylinder.height:g} mm with positive width and height')
+        raise ValueError(f'Pattern bounds must be within X=0..{2*cylinder.radius:g}, Z=0..{cylinder.height:g} mm with positive width and height')
     return values
-
-
-def simulate_rectangle(*,calibration='original',width=30,height=45,x=25,z=15,compensation=None,cylinder=CylinderSettings()):
-    """Dynamic polygon example on the fixed cylinder; not native Brep parity."""
-    width,height,x,z=rectangle_settings(width,height,x,z,cylinder=cylinder)
-    if calibration not in ('original','compensated'):raise ValueError('Invalid compensation mode')
-    rings=[[(x,z),(x+width,z),(x+width,z+height),(x,z+height)]]
-    contours=polygon_contours(rings,slice_levels(cylinder))
-    if not contours:raise ValueError('Rectangle does not intersect any slices. Increase its height or adjust its bottom position')
-    curve=curve_settings(compensation)
-    if calibration=='compensated' and curve[0]!=0 and any(curve[2]):
-        if len({c.layer for c in contours})<2:raise ValueError('Compensation requires at least two slices. Increase the height')
-        contours=compensate_contours(contours,amplitude=curve[0],control_x=curve[1],control_y=curve[2])
-    path=tube_path(cylinder)
-    return SolvedDisplay(path,contours,project_contours(path,contours),calibration,'rectangle')
-
-
-def simulate_svg(source,*,width,height,x,z,calibration='compensated',compensation=None,cylinder=CylinderSettings()):
-    from .svg_input import svg_contours
-    if calibration not in ('original','compensated'):raise ValueError('Invalid compensation mode')
-    width,height,x,z=rectangle_settings(width,height,x,z,cylinder=cylinder)
-    contours=svg_contours(source,width,height,x,z,slice_levels(cylinder))
-    if not contours:raise ValueError('SVG does not intersect any slices. Adjust its size or position')
-    curve=curve_settings(compensation)
-    if calibration=='compensated' and curve[0]!=0 and any(curve[2]):
-        if len({c.layer for c in contours})<2:raise ValueError('Nonzero compensation requires at least two slices')
-        contours=compensate_contours(contours,amplitude=curve[0],control_x=curve[1],control_y=curve[2])
-    path=tube_path(cylinder)
-    return SolvedDisplay(path,contours,project_contours(path,contours),calibration,'svg')
-
-
-def simulate_step(source,*,width,height,x,z,calibration='compensated',compensation=None,cylinder=CylinderSettings()):
-    from .step_input import step_contours
-    if calibration not in ('original','compensated'):raise ValueError('Invalid compensation mode')
-    width,height,x,z=rectangle_settings(width,height,x,z,cylinder=cylinder)
-    contours=step_contours(source,width,height,x,z,slice_levels(cylinder))
-    if not contours:raise ValueError('STEP does not intersect any slices. Adjust its size or position')
-    curve=curve_settings(compensation)
-    if calibration=='compensated' and curve[0]!=0 and any(curve[2]):
-        if len({c.layer for c in contours})<2:raise ValueError('Nonzero compensation requires at least two slices')
-        contours=compensate_contours(contours,amplitude=curve[0],control_x=curve[1],control_y=curve[2])
-    path=tube_path(cylinder)
-    return SolvedDisplay(path,contours,project_contours(path,contours),calibration,'step')
-
-
-def simulate_brush(source,*,width,height,x,z,calibration='compensated',compensation=None,cylinder=CylinderSettings()):
-    from .brush_input import brush_contours
-    if calibration not in ('original','compensated'):raise ValueError('Invalid compensation mode')
-    width,height,x,z=rectangle_settings(width,height,x,z,cylinder=cylinder)
-    contours=brush_contours(source,width,height,x,z,slice_levels(cylinder))
-    curve=curve_settings(compensation)
-    if contours and calibration=='compensated' and curve[0]!=0 and any(curve[2]):
-        if len({c.layer for c in contours})<2:raise ValueError('Nonzero compensation requires at least two slices')
-        contours=compensate_contours(contours,amplitude=curve[0],control_x=curve[1],control_y=curve[2])
-    path=tube_path(cylinder)
-    return SolvedDisplay(path,contours,project_contours(path,contours),calibration,'brush')
-
-
-def simulate_empty(calibration='compensated',cylinder=CylinderSettings()):
-    if calibration not in ('original','compensated'):raise ValueError('Invalid compensation mode')
-    path=tube_path(cylinder)
-    return SolvedDisplay(path,(),project_contours(path,()),calibration,'empty')
 
 
 def pattern_frame(cylinder):
@@ -220,18 +131,18 @@ def pattern_frame(cylinder):
     return cylinder
 
 
-def simulate_along_path(pattern,calibration,curve,cylinder):
+def simulate_along_path(pattern,curve,cylinder):
     from .path_partition import region_for,along_path
-    if calibration not in ('original','compensated'):raise ValueError('Invalid compensation mode')
     path=tube_path(cylinder)
     if pattern and pattern[0]=='spatial-brush':
         from .segments import partition_path
+        from .spatial_brush import merge_short_segments
         sequence=partition_path(path,[(a*path.length,b*path.length) for a,b in pattern[1]])
-        return SolvedDisplay(path,(),sequence,calibration,'spatial-brush')
-    effective=curve if calibration=='compensated' else (0,curve[1],curve[2])
+        sequence=merge_short_segments(sequence)
+        return SolvedDisplay(path,(),sequence,'spatial-brush')
     frame=pattern_frame(cylinder)
     region=region_for(pattern,frame)
     from .projection import projector
     transform=projector(cylinder.placement,2*frame.radius,frame.height) if cylinder.placement else None
-    sequence=along_path(path,region,height=frame.height,curve=effective,front_y=0 if transform else (cylinder.center[1] if cylinder.center else cylinder.radius) if cylinder.type=='cylinder' else None,projection=transform,back_y=-cylinder.placement[4] if cylinder.placement and len(cylinder.placement)>4 and cylinder.placement[4] is not None else None)
-    return SolvedDisplay(path,(),sequence,calibration,'along-path')
+    sequence=along_path(path,region,height=frame.height,curve=curve,front_y=0 if transform else (cylinder.center[1] if cylinder.center else cylinder.radius) if cylinder.type=='cylinder' else None,projection=transform,back_y=-cylinder.placement[4] if cylinder.placement and len(cylinder.placement)>4 and cylinder.placement[4] is not None else None)
+    return SolvedDisplay(path,(),sequence,'along-path')

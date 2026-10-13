@@ -39,10 +39,10 @@ class WebsiteTests(unittest.TestCase):
         from fluixer.webapp import preview,csv_payload
         from fluixer.pipeline import CylinderSettings
         from fluixer.compensation import curve_settings
-        data={'calibration':'compensated','pattern':{'type':'spatial-brush','windows':[[.1,.2]]}}
+        data={'pattern':{'type':'spatial-brush','windows':[[.1,.2]]}}
         r=self.client.post('/api/display',base_url=self.base,headers=self.headers,json=data)
         self.assertEqual(r.status_code,200)
-        self.assertEqual(r.json,json.loads(json.dumps(preview('compensated',('spatial-brush',((.1,.2),)),curve_settings(),CylinderSettings()))))
+        self.assertEqual(r.json,json.loads(json.dumps(preview(('spatial-brush',((.1,.2),)),curve_settings(),CylinderSettings()))))
         r=self.client.post('/api/export',base_url=self.base,headers=self.headers,json=data)
         self.assertEqual(r.status_code,200)
         self.assertEqual(r.data,csv_payload(data)[0])
@@ -68,3 +68,58 @@ class WebsiteTests(unittest.TestCase):
                 self.assertEqual(r.headers['Retry-After'],'1')
             finally:release.set();t.join(5)
         self.assertEqual(self.client.post('/api/display',base_url=self.base,headers=self.headers,json={}).status_code,200)
+
+    def test_svg_input_removed(self):
+        for method in ('get', 'post'):
+            response = getattr(self.client, method)('/api/svg', base_url=self.base,
+                headers=self.headers, **({'json': {'source': '<svg/>'}} if method == 'post' else {}))
+            self.assertEqual(response.status_code, 404)
+        pattern = {'type': 'svg', 'source': '<svg/>', 'width': 30, 'height': 45, 'x': 25, 'z': 15}
+        for endpoint in ('display', 'export'):
+            response = self.client.post('/api/' + endpoint, base_url=self.base,
+                headers=self.headers, json={'pattern': pattern})
+            self.assertEqual(response.status_code, 400)
+
+    def test_step_routes_without_svg_parser(self):
+        for endpoint, parser in [('step', 'fluixer.step_input.parse_step'),
+                                 ('tube-step', 'fluixer.tube_step.parse_tube_step')]:
+            with patch(parser, return_value={'parsed': endpoint}) as parse:
+                response = self.client.post('/api/' + endpoint, base_url=self.base,
+                    headers=self.headers, json={'source': 'step fixture'})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json, {'parsed': endpoint})
+                parse.assert_called_once_with('step fixture')
+
+    def test_rectangles_removed_and_pattern_bounds_preserved(self):
+        from fluixer.pipeline import pattern_bounds, CylinderSettings
+        from fluixer.path_partition import region_for
+        self.assertEqual(pattern_bounds(30, 45, 25, 15), (30, 45, 25, 15))
+        for bounds in [(0, 45, 25, 15), (30, 45, -1, 15), (90, 45, 0, 15)]:
+            with self.assertRaises(ValueError): pattern_bounds(*bounds)
+        with self.assertRaises(ValueError): region_for((30, 45, 25, 15), CylinderSettings())
+        pattern = {'type': 'rectangle', 'width': 30, 'height': 45, 'x': 25, 'z': 15}
+        for endpoint in ('display', 'export'):
+            response = self.client.post('/api/' + endpoint, base_url=self.base,
+                headers=self.headers, json={'pattern': pattern})
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json['error'], 'Unsupported pattern type')
+        response = self.client.get('/api/display?pattern=rectangle&width=30&height=45&x=25&z=15',
+            base_url=self.base, headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+
+    def test_unified_compensation_defaults_and_requests(self):
+        from fluixer.compensation import curve_settings, bezier_value
+        self.assertEqual(curve_settings(), (40.0, (0.0, 1/3, 2/3, 1.0), (0.0, 0.0, 0.0, 0.0)))
+        self.assertEqual(bezier_value(0.5), 0)
+        response = self.client.get('/api/display', base_url=self.base, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('calibration', response.json)
+        self.assertEqual(response.json['compensation']['y'], [0, 0, 0, 0])
+        for mode in ('original', 'compensated'):
+            for endpoint in ('display', 'export'):
+                response = self.client.post('/api/' + endpoint, base_url=self.base,
+                    headers=self.headers, json={'calibration': mode})
+                self.assertEqual(response.status_code, 400)
+            response = self.client.get('/api/display?calibration=' + mode,
+                base_url=self.base, headers=self.headers)
+            self.assertEqual(response.status_code, 400)

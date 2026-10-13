@@ -136,29 +136,6 @@ select.inp {
   border: 0;
   border-radius: var(--r-pill);
 }
-.checkbox {
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
-  display: inline-grid;
-  place-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.checkbox:checked {
-  background: var(--display);
-  border-color: var(--display);
-}
-.checkbox:checked::after {
-  content: "";
-  width: 8px;
-  height: 4px;
-  border-left: 1px solid var(--bg);
-  border-bottom: 1px solid var(--bg);
-  transform: rotate(-45deg);
-}
 .primary {
   width: 100%;
   justify-content: space-between;
@@ -179,10 +156,6 @@ select.inp {
   align-items: center;
   gap: 16px;
   margin-bottom: 24px;
-}
-.view-header h2 {
-  font-size: 24px;
-  margin: 8px 0 0;
 }
 .view-buttons {
   display: flex;
@@ -337,9 +310,6 @@ canvas:active {
     gap: 8px;
     left: 16px;
   }
-  .view-header h2 {
-    font-size: 20px;
-  }
 }
 @media (max-width: 620px) {
   header {
@@ -366,9 +336,6 @@ canvas:active {
   .viewport {
     height: 400px;
   }
-  .tag {
-    font-size: 9px;
-  }
   .legend {
     gap: 8px;
   }
@@ -383,11 +350,6 @@ canvas:active {
   }
 }
 
-/* Plain application background. */
-body::before {
-  content: none;
-  display: none;
-}
 
 .metrics strong {
   font-size: clamp(20px, 2.3vw, 32px);
@@ -402,26 +364,11 @@ body::before {
 }
 
 /* === Projection controls === */
-.placement-tools {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.placement-tools select {
-  width: 128px;
-}
 #plane-toggle[aria-pressed="true"] {
   background: var(--display);
   color: var(--bg);
 }
 
-.placement-tools {
-  align-items: center;
-}
-.placement-tools label {
-  margin: 0;
-}
 
 /* Flat played fill tracks the thumb center, including its inset. */
 .slider {
@@ -902,10 +849,6 @@ aside {
 }
 
 /* Paired sliders and numeric inputs share one row: 2:1. */
-.sidebar-panel .tube-parameter-fields {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
 .sidebar-panel .slider-number-row {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);

@@ -2,7 +2,7 @@
 from bisect import bisect_right
 from dataclasses import dataclass, field
 import math
-from .geometry import finite, PathProjection
+from .geometry import finite
 
 # Five-point Gauss-Legendre integration; cylinder spans are short smooth cubics.
 _NODES = (0, -.5384693101056831, .5384693101056831, -.9061798459386640, .9061798459386640)
@@ -19,7 +19,7 @@ def polynomial_value(coefficients, x):
 def unit_roots(coefficients):
     """Real polynomial roots on [0,1], isolated by derivative critical points.
 
-    Used for cubic boundary crossings and quintic closest-point stationarity.
+    Used for polynomial boundary crossings and path bounding-box extrema.
     Identically zero polynomials contribute endpoints (a coincident boundary).
     """
     c=list(coefficients)
@@ -83,26 +83,6 @@ class CubicSpan:
     def length(self):
         return self._length
 
-    def lower_distance_bound(self,point):
-        # A cubic lies inside its Bezier control hull, so its AABB is a lower bound.
-        distance=0.0
-        for p,(a,b,c,d) in zip(point,self.coefficients):
-            values=(a,a+b/3,a+2*b/3+c/3,a+b+c+d)
-            distance+=max(min(values)-p,0,p-max(values))**2
-        return math.sqrt(distance)
-
-    def project(self,point):
-        polynomial=[0.0]*6
-        for p,c in zip(point,self.coefficients):
-            delta=[c[0]-p,*c[1:]]
-            derivative=[c[1],2*c[2],3*c[3]]
-            for i,a in enumerate(delta):
-                for j,b in enumerate(derivative):
-                    polynomial[i+j]+=a*b
-        roots=(0.0,1.0)+unit_roots(polynomial)
-        candidates=[(u,self.point_at(u),math.dist(point,self.point_at(u))) for u in roots]
-        return min(candidates,key=lambda x:(x[2],x[0]))
-
 
 @dataclass(frozen=True)
 class CubicPath:
@@ -157,20 +137,6 @@ class CubicPath:
             candidate=mid-error/speed if speed>1e-14 else -1
             mid=candidate if left<candidate<right else (left+right)/2
         return piece.point_at((left+right)/2)
-
-    def project(self,point):
-        point=tuple(finite(v,'point') for v in point)
-        if len(point)!=3:raise ValueError('point must have three coordinates')
-        best=None
-        for i,piece in enumerate(self.pieces):
-            if best and piece.lower_distance_bound(point)>best.distance_to_path:
-                continue
-            u,q,d=piece.project(point)
-            start=self._ends[i-1] if i else 0
-            candidate=PathProjection(start+piece.length_to(u),q,d)
-            if best is None or (d,candidate.distance_along)<(best.distance_to_path,best.distance_along):
-                best=candidate
-        return best
 
 
 def interpolate_chord(points, *, z_scale=1.0):

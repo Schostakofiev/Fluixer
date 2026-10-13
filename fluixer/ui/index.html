@@ -225,6 +225,7 @@
               <option value="hilbert">Hilbert</option>
               <option value="custom-step">Custom</option>
             </select>
+            <h2></h2>
             <div id="tube-step-fields" hidden>
               <button class="btn btn-outline" id="tube-step-open" type="button">Import</button>
               <input id="tube-step-file" type="file" accept=".stp,.step" hidden />
@@ -236,7 +237,6 @@
               >
                 Reverse
               </button>
-              <p id="tube-step-status" role="status"></p>
             </div>
             <div class="pair">
               <div id="tube-radius-field">
@@ -415,28 +415,26 @@
           <fieldset class="csv-edit-controls">
             <h2>CSV Export</h2>
             <label for="pre-add">Pre-Add (mm)</label>
-            <div class="slider-number-row">
-              <input
-                class="slider"
-                id="pre-add-slider"
-                type="range"
-                min="0"
-                max="10000"
-                step="0.1"
-                value="730"
-                aria-label="Pre-Add slider"
-              />
-              <input
-                class="inp"
-                id="pre-add"
-                type="number"
-                min="0"
-                max="10000"
-                step="0.1"
-                value="730"
-                required
-              />
-            </div>
+            <input
+              class="inp"
+              id="pre-add"
+              type="number"
+              min="0"
+              max="10000"
+              step="0.1"
+              value="730"
+              required
+            />
+            <label for="length-per-100-steps">100 Steps Length (mm)</label>
+            <input
+              class="inp"
+              id="length-per-100-steps"
+              type="number"
+              min="0"
+              step="any"
+              value="9.65"
+              required
+            />
             <label for="speed">Speed</label>
             <input class="inp" id="speed" type="number" min="0" step="1" value="400" required />
             <div class="pair">
@@ -573,7 +571,6 @@
               </svg>
             </button>
           </div>
-          <input id="contours" type="checkbox" hidden aria-hidden="true" />
           <canvas id="tube-webgl" aria-hidden="true"></canvas>
           <canvas
             id="preview"
