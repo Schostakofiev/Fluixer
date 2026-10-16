@@ -1,4 +1,4 @@
-# Fluixer 0.2.1
+# Fluixer 0.2.2
 
 A design tool to simulate and export csv of Fluixel, an information visualisation method based on liquid segments.
 https://fluixer-production.up.railway.app/

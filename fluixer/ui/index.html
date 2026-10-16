@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/style.css" />
     <script src="/tube-renderer.js" defer></script>
     <script src="/image-input.js" defer></script>
+    <script src="/visual-calibration.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -57,6 +58,16 @@
           >
             CSV
           </button>
+         <button
+            id="tab-calibration"
+            type="button"
+            role="tab"
+            aria-controls="panel-calibration"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Calib
+          </button>
         </nav>
         <div
           id="panel-project"
@@ -91,7 +102,7 @@
             </select>
             <div id="image-fields" hidden>
               <h2>Image Input</h2>
-              <button class="btn btn-outline" id="image-open" type="button">Image Input</button>
+              <button class="btn btn-outline" id="image-open" type="button">Import</button>
               <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" hidden />
               <label for="image-mode">Processing Method</label>
               <select class="inp" id="image-mode">
@@ -366,6 +377,15 @@
             </div>
             <p id="tube-render-error" role="status"></p>
           </section>
+        </fieldset>
+        </div>
+        <div
+          id="panel-calibration"
+          class="sidebar-panel"
+          role="tabpanel"
+          aria-labelledby="tab-calibration"
+          hidden
+        >
           <section id="geometry-compensation">
             <fieldset class="csv-edit-controls">
             <div class="sidebar-section-heading">
@@ -400,9 +420,16 @@
               value="40"
             />
             <p class="note" id="curve-status"></p>
+            <section class="visual-calibration-launch">
+              <h2>Visual Calibration</h2>
+              <button class="btn btn-outline" id="calibration-open" type="button">Open Photo Calibration</button>
+              <div class="standard-leveling-actions">
+                <button class="btn btn-outline" id="calibration-standard" type="button">Export 100-Step Pattern</button>
+              </div>
+              <p id="calibration-standard-status" role="status"></p>
+            </section>
             </fieldset>
           </section>
-        </fieldset>
         </div>
         <div
           id="panel-export"
@@ -665,8 +692,11 @@
             <strong id="total">—</strong>
           </div>
           <div>
-            <span>Liquid Total Length</span>
-            <strong id="liquid-total">—</strong>
+            <span>Current Output</span>
+            <strong id="current-output">
+              <span id="current-output-value">—</span>
+              <span id="current-output-unit">steps</span>
+            </strong>
           </div>
           <div>
             <span>Liquid-Gas Segment Count</span>
@@ -675,5 +705,56 @@
         </div>
       </article>
     </main>
+    <dialog id="calibration-dialog" aria-labelledby="calibration-title">
+      <div class="calibration-dialog-heading">
+        <h2 id="calibration-title">Visual Calibration</h2>
+        <button class="btn-icon" id="calibration-close" type="button" aria-label="Close" title="Close">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <fieldset class="csv-edit-controls calibration-dialog-content">
+        <div class="calibration-photo-area">
+          <canvas id="calibration-photo" width="600" height="600" aria-label="Photo endpoints. In manual mode click to add a point; Alt-click to remove a point." hidden></canvas>
+        </div>
+        <div class="calibration-photo-controls">
+          <button class="btn btn-outline" id="calibration-file-open" type="button">Import Photo</button>
+          <input id="calibration-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
+          <label for="calibration-mode">Endpoints</label>
+          <select class="inp" id="calibration-mode">
+            <option value="auto">Automatic</option>
+            <option value="manual">Mark Points</option>
+          </select>
+          <div class="sidebar-section-heading calibration-parameters-heading">
+            <h2>Parameters</h2>
+            <button class="btn-icon sidebar-reset" id="calibration-parameters-reset" type="button" aria-label="Reset Parameters" title="Reset Parameters">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /></svg>
+            </button>
+          </div>
+          <div class="calibration-thresholds">
+            <div>
+              <label for="calibration-sensitivity">Sensitivity</label>
+              <div class="slider-number-row">
+                <input class="slider" id="calibration-sensitivity-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Sensitivity" />
+                <input class="inp" id="calibration-sensitivity" type="number" min="0" max="100" value="50" step="1" />
+              </div>
+            </div>
+            <div>
+              <label for="calibration-noise">Noise Filter</label>
+              <div class="slider-number-row">
+                <input class="slider" id="calibration-noise-slider" type="range" min="0" max="100" value="50" step="1" aria-label="Noise Filter" />
+                <input class="inp" id="calibration-noise" type="number" min="0" max="100" value="50" step="1" />
+              </div>
+            </div>
+          </div>
+          <div class="calibration-actions">
+            <button class="btn btn-outline" id="calibration-points-clear" type="button">Clear Points</button>
+            <button class="btn btn-outline" id="calibration-download" type="button" disabled>Export Measurements</button>
+          </div>
+          <output id="calibration-result" aria-live="polite"></output>
+          <p id="calibration-error" role="alert"></p>
+          <button class="btn btn-primary" id="calibration-apply" type="button" disabled>Apply Compensation</button>
+        </div>
+      </fieldset>
+    </dialog>
   </body>
 </html>

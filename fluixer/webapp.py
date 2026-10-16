@@ -80,8 +80,7 @@ def preview(pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
     return {'bounds':[list(p) for p in path_bounds(display.path)],'plane':plane,'cylinder':cylinder_config(cylinder),'compensation':curve_config(curve),'pattern':'Empty tube' if pattern==('empty',) else 'Image pattern' if pattern and pattern[0]=='image' else 'Brush pattern' if pattern and pattern[0]=='brush' else 'STEP region' if pattern and pattern[0]=='step' else 'Spatial brush' if pattern and pattern[0]=='spatial-brush' else 'S · Full outline',
         'pattern_config':{'type':'spatial-brush','windows':[list(w) for w in pattern[1]]} if pattern and pattern[0]=='spatial-brush' else {'type':'empty'} if pattern==('empty',) else dict(type=pattern[0],source=pattern[1],**dict(zip(('width','height','x','z'),pattern[2:]))) if pattern and pattern[0] in ('step','brush','image') else {'type':'captured-s'},'length_unit':'mm',
         'path_length':display.path.length,'segments':segments,
-        'liquid_length':sum(s.length for s in display.sequence.segments if s.phase=='liquid'),
-        'contours':[[c.start,c.end] for c in display.contours]}
+        'liquid_length':sum(s.length for s in display.sequence.segments if s.phase=='liquid')}
 
 
 def csv_payload(data):
@@ -131,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.local_request():return
         url=urlsplit(self.path)
-        assets={'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/tube-renderer.js':('tube-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
+        assets={'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/tube-renderer.js':('tube-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
         for asset in (Path(__file__).parent/'ui').glob('css/*.css'):
             assets['/css/'+asset.name]=('css/'+asset.name,'text/css')
         for asset in (Path(__file__).parent/'ui').glob('fonts/open/*.ttf'):
@@ -157,11 +156,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.local_request():return
-        if self.path not in ('/api/image','/api/export','/api/step','/api/tube-step','/api/display'):self.error(404,'Endpoint not found');return
+        if self.path not in ('/api/image','/api/export','/api/calibration-standard','/api/step','/api/tube-step','/api/display'):self.error(404,'Endpoint not found');return
         try:
             count=int(self.headers.get('Content-Length','0'))
             if not 0<count<=4194304:raise ValueError('Request must not exceed 4 MB')
             data=json.loads(self.rfile.read(count))
+            if self.path=='/api/calibration-standard':
+                from .standard_leveling import standard_csv_payload
+                with _lock:body,name,rows,count=standard_csv_payload(data)
+                self.send(200,body,'text/csv; charset=utf-8',{'Content-Disposition':f'attachment; filename="{name}"','X-Row-Count':str(rows),'X-Liquid-Count':str(count)});return
             if self.path=='/api/image':
                 if not isinstance(data,dict) or set(data)!={'source'}:raise ValueError('Invalid image parameters')
                 from .image_input import photo_subject

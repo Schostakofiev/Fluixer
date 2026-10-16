@@ -111,7 +111,6 @@ def tube_path(c):
 @dataclass(frozen=True)
 class SolvedDisplay:
     path: CubicPath | TubePath
-    contours: tuple[()]  # Empty legacy field retained for API compatibility.
     sequence: PhysicalSequence
     pattern_id: str
 
@@ -139,10 +138,11 @@ def simulate_along_path(pattern,curve,cylinder):
         from .spatial_brush import merge_short_segments
         sequence=partition_path(path,[(a*path.length,b*path.length) for a,b in pattern[1]])
         sequence=merge_short_segments(sequence)
-        return SolvedDisplay(path,(),sequence,'spatial-brush')
+        return SolvedDisplay(path,sequence,'spatial-brush')
     frame=pattern_frame(cylinder)
     region=region_for(pattern,frame)
     from .projection import projector
     transform=projector(cylinder.placement,2*frame.radius,frame.height) if cylinder.placement else None
-    sequence=along_path(path,region,height=frame.height,curve=curve,front_y=0 if transform else (cylinder.center[1] if cylinder.center else cylinder.radius) if cylinder.type=='cylinder' else None,projection=transform,back_y=-cylinder.placement[4] if cylinder.placement and len(cylinder.placement)>4 and cylinder.placement[4] is not None else None)
-    return SolvedDisplay(path,(),sequence,'along-path')
+    lo,hi=path_bounds(path)
+    sequence=along_path(path,region,height_range=(lo[2],hi[2]),curve=curve,front_y=0 if transform else (cylinder.center[1] if cylinder.center else cylinder.radius) if cylinder.type=='cylinder' else None,projection=transform,back_y=-cylinder.placement[4] if cylinder.placement and len(cylinder.placement)>4 and cylinder.placement[4] is not None else None)
+    return SolvedDisplay(path,sequence,'along-path')

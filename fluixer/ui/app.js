@@ -1,4 +1,5 @@
 let importedCsv = null, csvReadId = 0, csvReading = false;
+let calibPreviewPending = false, calibPreviewReading = false, calibPreviousPreview = null;
 let animatedCache = null, viewDrawFrame = null;
 function requestViewDraw() {
   if (viewDrawFrame !== null) return;
@@ -18,7 +19,6 @@ function uiColor(name, fallback) {
         .trim() || fallback
     : fallback;
 }
-('use strict');
 const $ = (id) => document.getElementById(id),
   canvas = $('preview'),
   ctx = canvas.getContext('2d');
@@ -26,7 +26,6 @@ let renderMode = 'lines',
   innerDiameter = 2,
   tubeRenderer = null;
 let planeVisible = true,
-  placementTube = null,
   tubeCenter = null;
 let initialPlacement = null,
   placement = null,
@@ -50,12 +49,12 @@ let animationProgress = 1,
   animationTime = null;
 let motionCache = null,
   motionSource = null;
-function stopAnimation() {
+function stopAnimation(refresh = true) {
   animationPlaying = false;
   animationTime = null;
   if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
   animationFrame = null;
-  syncPlayback();
+  if (refresh) syncPlayback();
 }
 function syncSliderFill(input) {
   const min = Number(input.min || 0),
@@ -96,16 +95,21 @@ function syncPlayback() {
     'playback-rate',
   ])
     $(id).disabled = !display || projectBusy || previewLoading || csvReading;
+  syncPlaybackProgress();
+}
+// Per-frame updates never refresh unrelated controls or start requests.
+function syncPlaybackProgress() {
   $('playback-progress').value = Math.round(animationProgress * 1000);
   syncSliderFill($('playback-progress'));
   $('playback-progress').ariaValueText = Math.round(animationProgress * 100) + '%';
+  syncCurrentOutput();
 }
-function resetAnimation() {
-  stopAnimation();
+function resetAnimation(refresh = true) {
+  stopAnimation(false);
   animationProgress = 1;
   motionCache = null;
   motionSource = null;
-  syncPlayback();
+  if (refresh) syncPlayback();
 }
 // CSV_PREVIEW_CORE_START
 function parsePreviewCsv(source, settings) {
@@ -153,7 +157,7 @@ function parsePreviewCsv(source, settings) {
   if (!rows.length || rows[0].values.map(v => v.toLowerCase()).join(',') !== header.join(','))
     throw Error('Expected CSV header: ' + header.join(','));
   if (rows.length < 2) throw Error('CSV contains no commands');
-  const commands = [], units = new Set();
+  const commands = [], outputCommands = [], units = new Set();
   let total = 0;
   const number = (raw, name, line) => {
     if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw) || !Number.isFinite(Number(raw)))
@@ -177,6 +181,7 @@ function parsePreviewCsv(source, settings) {
     total += length;
     if (!Number.isFinite(total) || total > 1e8) throw Error('CSV sequence is too long');
     const phase = motor === 'g' ? 'gas' : 'liquid';
+    outputCommands.push({ phase, length, steps });
     if (commands.length && commands[commands.length - 1].phase === phase)
       commands[commands.length - 1].length += length;
     else commands.push({ phase, length });
@@ -192,7 +197,7 @@ function parsePreviewCsv(source, settings) {
     if (tail.length <= 1e-8) previewCommands.pop();
   }
   const previewTotal = previewCommands.reduce((sum, command) => sum + command.length, 0);
-  return { commands, total, previewCommands, previewTotal, preAdd, omittedPreAdd,
+  return { commands, outputCommands, total, previewCommands, previewTotal, preAdd, omittedPreAdd,
     kGas, kLiquid, lengthPer100Steps: stepLength, rows: rows.length - 1, approximate: units.has('segments') };
 }
 function csvPreviewWindows(sequence, pathLength, progress) {
@@ -209,6 +214,90 @@ function csvPreviewWindows(sequence, pathLength, progress) {
   return windows.reverse();
 }
 // CSV_PREVIEW_CORE_END
+
+// CURRENT_OUTPUT_CORE_START
+function roundOutputSteps(value) {
+  // Match Python round, including half-to-even ties.
+  const lower = Math.floor(value);
+  return value - lower === 0.5 ? lower + (lower % 2) : Math.round(value);
+}
+function outputTimeline(segments, settings) {
+  const kGas = Math.trunc(Number(settings.kGas)), kLiquid = Math.trunc(Number(settings.kLiquid));
+  const stepLength = Number(settings.lengthPer100Steps), preAdd = Number(settings.preAdd);
+  if (![kGas, kLiquid, preAdd].every(v => Number.isFinite(v) && v >= 0) ||
+      !Number.isFinite(stepLength) || stepLength <= 0) return { commands: [], total: 0 };
+  // Match the animation's injection order: omit the unfilled terminal gas.
+  let last = segments.length - 1;
+  while (last >= 0 && segments[last].phase !== 'liquid') last--;
+  const visible = segments.slice(0, last + 1);
+  const total = visible.reduce((sum, command) => sum + command.length, 0);
+  const commands = visible.map((command, index) => {
+    const length = command.length + (index === 0 && command.phase === 'gas' ? preAdd : 0);
+    const value = Number((Number(length.toFixed(6)) / (stepLength / 100)).toFixed(6));
+    const steps = Math.max(1, value * (command.phase === 'gas' ? kGas : kLiquid) / 625);
+    const unit = settings.unit === 'segments' ? 'segments' : 'steps';
+    const amount = unit === 'segments' ? Math.max(1, Math.floor(steps * 3 / 200 + 0.5)) : Math.max(1, roundOutputSteps(steps));
+    return { phase: command.phase, length, amount, unit, split: unit === 'segments' ? 89 : 2000 };
+  }).reverse();
+  return { commands, total };
+}
+function outputAtProgress(commands, total, progress) {
+  if (!(total > 0) || !commands.length) return null;
+  const distance = Math.max(0, Math.min(1, progress)) * total;
+  let start = 0;
+  for (const command of commands) {
+    const end = start + command.length;
+    if (command.length > 0 && (distance < end || (progress >= 1 && distance <= end + 1e-8))) {
+      let amount = command.amount ?? command.steps;
+      if (command.split) {
+        const passed = Math.max(0, Math.min(1, (distance - start) / command.length)) * amount;
+        const index = Math.min(Math.ceil(amount / command.split) - 1, Math.floor(passed / command.split));
+        amount = Math.min(command.split, amount - index * command.split);
+      }
+      return { phase: command.phase, amount, unit: command.unit || 'steps' };
+    }
+    start = end;
+  }
+  return null;
+}
+function currentOutputText(command, unit) {
+  if (!command || !Number.isFinite(command.amount)) return { text: '—', unit };
+  const amount = command.unit === unit ? command.amount
+    : unit === 'segments' ? command.amount * 3 / 200 : command.amount * 200 / 3;
+  return {
+    text: `${command.phase === 'liquid' ? 'L' : 'G'} ${unit === 'steps' ? roundOutputSteps(amount) : Number(amount.toFixed(2))}`,
+    unit,
+  };
+}
+// CURRENT_OUTPUT_CORE_END
+
+var currentOutputCache;
+function syncCurrentOutput() {
+  const el = $('current-output-value');
+  const unitLabel = $('current-output-unit');
+  unitLabel.textContent = $('unit').value === 'segments' ? 'segments' : 'steps';
+  if (!display || previewLoading || projectBusy || csvReading) { el.textContent = '—'; return; }
+  const unit = $('unit').value === 'segments' ? 'segments' : 'steps';
+  let timeline;
+  if (importedCsv) {
+    timeline = { commands: importedCsv.outputCommands, total: importedCsv.previewTotal };
+  } else {
+    const settings = { kGas: $('k-gas').value, kLiquid: $('k-liquid').value,
+      lengthPer100Steps: $('length-per-100-steps').value, preAdd: $('pre-add').value, unit };
+    const key = JSON.stringify(settings);
+    if (currentOutputCache?.display !== display || currentOutputCache.key !== key)
+      currentOutputCache = { display, key, timeline: outputTimeline(display.segments, settings) };
+    timeline = currentOutputCache.timeline;
+  }
+  const command = outputAtProgress(timeline.commands, timeline.total, animationProgress);
+  const output = currentOutputText(command, unit);
+  el.textContent = output.text;
+  unitLabel.textContent = output.unit;
+}
+for (const id of ['k-gas', 'k-liquid', 'length-per-100-steps', 'pre-add'])
+  $(id).addEventListener('input', syncCurrentOutput);
+$('unit').addEventListener('change', syncCurrentOutput);
+
 
 function movingWindows(segments, length, progress) {
   // Injection order is reversed: the last liquid in the final path enters first.
@@ -300,7 +389,8 @@ function animationTick(time) {
     animationPlaying = false;
     animationTime = null;
   }
-  syncPlayback();
+  if (animationPlaying) syncPlaybackProgress();
+  else syncPlayback();
   draw();
   if (animationPlaying) animationFrame = window.requestAnimationFrame(animationTick);
 }
@@ -319,7 +409,7 @@ $('playback-play').addEventListener('click', () => {
 });
 $('playback-progress').addEventListener('input', () => {
   const next = Number($('playback-progress').value) / 1000;
-  stopAnimation();
+  stopAnimation(false);
   animationProgress = Math.max(0, Math.min(1, next));
   syncPlayback();
   draw();
@@ -329,7 +419,7 @@ for (const [id, p] of [
   ['playback-final', 1],
 ])
   $(id).addEventListener('click', () => {
-    stopAnimation();
+    stopAnimation(false);
     animationProgress = p;
     syncPlayback();
     draw();
@@ -404,6 +494,7 @@ function project(point, w, h) {
   return createProjector(w, h)(point);
 }
 function draw() {
+  syncCurrentOutput();
   if (viewDrawFrame !== null) {
     window.cancelAnimationFrame(viewDrawFrame);
     viewDrawFrame = null;
@@ -633,7 +724,11 @@ function sameTube(a, b) {
 }
 let tubeKind = 'cylinder';
 function tubeLabels() {
-  $('geometry-compensation').hidden = !['cylinder', 's-curve'].includes($('tube-type').value);
+  const calibrationAvailable = ['cylinder', 's-curve'].includes($('tube-type').value);
+  $('tab-calibration').disabled = !calibrationAvailable;
+  if (!calibrationAvailable && !$('panel-calibration').hidden) {
+    selectSidebarTab('tube');
+  }
   const isS = $('tube-type').value !== 'cylinder',
     isH = $('tube-type').value === 'hilbert';
   for (const id of ['tube-wind', 'tube-slider-wind']) $(id).max = isH ? 6 : 64;
@@ -652,7 +747,6 @@ function tubeLabels() {
 }
 function setTube(c) {
   tubeCenter = c.center ? c.center.slice() : null;
-  placementTube = { ...c };
   if (c.type === 'custom-step') {
     tubeStepSource = c.source;
     tubeStepReverse = !!c.reverse;
@@ -676,6 +770,7 @@ function setTube(c) {
 }
 $('mapping-type').addEventListener('change', loadDisplay);
 $('tube-type').addEventListener('change', () => {
+  spatialStroke = null;
   const next = $('tube-type').value;
   if (next !== tubeKind) {
     ++tubeStepReadId;
@@ -718,7 +813,7 @@ for (const n of tubeNames) {
     syncSliderFill($('tube-slider-' + n));
     loadDisplay();
   });
-  $('tube-slider-' + n).addEventListener('change', loadDisplay);
+  // Range input fires for dragging and keyboard edits; change would repeat the final request.
 }
 $('tube-reset').addEventListener('click', () => {
   const csvDiameter = importedCsv ? Number($('tube-diameter').value) : null;
@@ -1393,11 +1488,12 @@ let curveState = JSON.parse(JSON.stringify(DEFAULT_CURVE)),
 function validateCurve(c) {
   if (
     !c ||
-    Object.keys(c).sort().join('|') !== 'amplitude|x|y' ||
+    !['amplitude|x|y', 'amplitude|interpolation|x|y'].includes(Object.keys(c).sort().join('|')) ||
+    ('interpolation' in c && c.interpolation !== 'pchip') ||
     !Array.isArray(c.x) ||
     !Array.isArray(c.y) ||
     c.x.length < 2 ||
-    c.x.length > 12 ||
+    c.x.length > (c.interpolation ? 256 : 12) ||
     c.y.length !== c.x.length
   )
     throw Error('Incomplete compensation curve parameters');
@@ -1413,7 +1509,7 @@ function validateCurve(c) {
     c.y.some((v) => typeof v !== 'number' || !Number.isFinite(v) || v < -1 || v > 1) ||
     c.x[0] !== 0 ||
     c.x[c.x.length - 1] !== 1 ||
-    c.x.some((v, i) => i > 0 && v < c.x[i - 1])
+    c.x.some((v, i) => i > 0 && (c.interpolation ? v <= c.x[i - 1] : v < c.x[i - 1]))
   )
     throw Error('X must be ordered within 0–1; Y must be within -1–1');
   return c;
@@ -1422,6 +1518,7 @@ function selectedCurve() {
   for (const id of curveIds)
     if (String($(id).value).trim() === '') throw Error('Complete all compensation parameters');
   return validateCurve({
+    ...(curveState.interpolation ? { interpolation: curveState.interpolation } : {}),
     amplitude: Number($('curve-amplitude').value),
     x: [...curveState.x],
     y: [...curveState.y],
@@ -1485,8 +1582,11 @@ function drawCurve(c) {
   g.lineWidth = 2;
   g.beginPath();
   g.moveTo(px(c.x[0]), py(c.y[0]));
-  for (let j = 1; j <= 160; j++)
-    g.lineTo(px(bezierCoordinate(c.x, j / 160)), py(bezierCoordinate(c.y, j / 160)));
+  for (let j = 1; j <= 256; j++) {
+    const u = j / 256;
+    g.lineTo(px(c.interpolation ? u : bezierCoordinate(c.x, u)),
+      py(c.interpolation ? FluixerCalibration.interpolate(u, c.x, c.y) : bezierCoordinate(c.y, u)));
+  }
   g.stroke();
   g.fillStyle = uiColor('primary', '#1C1C1C');
   g.font = canvasFont(10);
@@ -1500,6 +1600,7 @@ function drawCurve(c) {
   g.textAlign = 'left';
   g.textBaseline = 'alphabetic';
   for (let i = 0; i < c.x.length; i++) {
+    if (c.interpolation && i % Math.max(1, Math.ceil(c.x.length / 12)) && i !== c.x.length - 1) continue;
     const label = 'P' + i,
       x = w - py(c.y[i]),
       y = px(c.x[i]),
@@ -1519,6 +1620,7 @@ function drawCurve(c) {
 function sameCurve(a, b) {
   return (
     !!b &&
+    a.interpolation === b.interpolation &&
     a.x.length === b.x?.length &&
     a.y.length === b.y?.length &&
     a.amplitude === b.amplitude &&
@@ -1536,7 +1638,7 @@ function curvePosition(e) {
   return [screenY, 280 - screenX];
 }
 curveCanvas.addEventListener('pointerdown', (e) => {
-  if (projectBusy || curveDrag || e.altKey || !e.isPrimary || e.button !== 0) return;
+  if (projectBusy || (importedCsv && !importedCsv.standard) || csvReading || curveDrag || e.altKey || !e.isPrimary || e.button !== 0) return;
   let c;
   try {
     c = selectedCurve();
@@ -1570,8 +1672,11 @@ curveCanvas.addEventListener('pointermove', (e) => {
     c = selectedCurve(),
     i = curveDrag.index;
   c.y[i] = Math.max(-1, Math.min(1, (136 - y) / 120));
-  if (i > 0 && i < c.x.length - 1)
-    c.x[i] = Math.max(c.x[i - 1], Math.min(c.x[i + 1], (x - 24) / 240));
+  if (i > 0 && i < c.x.length - 1) {
+    // Interpolated samples must remain strictly ordered, even when dragged onto a neighbor.
+    const gap = c.interpolation ? Math.min(1e-6, (c.x[i + 1] - c.x[i - 1]) / 4) : 0;
+    c.x[i] = Math.max(c.x[i - 1] + gap, Math.min(c.x[i + 1] - gap, (x - 24) / 240));
+  }
   setCurve(c);
   loadDisplay();
 });
@@ -1609,7 +1714,7 @@ $('curve-reset').addEventListener('click', () => {
   loadDisplay();
 });
 curveCanvas.addEventListener('click', (e) => {
-  if (projectBusy || curveDrag || e.button !== 0) return;
+  if (projectBusy || (importedCsv && !importedCsv.standard) || csvReading || curveDrag || e.button !== 0) return;
   let c;
   try {
     c = selectedCurve();
@@ -1632,12 +1737,12 @@ curveCanvas.addEventListener('click', (e) => {
     c.y.splice(best, 1);
     selectedPoint = null;
   } else {
-    if (best >= 0 || c.x.length >= 12) return;
+    if (best >= 0 || c.x.length >= (c.interpolation ? 256 : 12)) return;
     let point = null,
       nearest = 9;
     for (let j = 1; j < 400; j++) {
-      const px = bezierCoordinate(c.x, j / 400),
-        py = bezierCoordinate(c.y, j / 400),
+      const px = c.interpolation ? j / 400 : bezierCoordinate(c.x, j / 400),
+        py = c.interpolation ? FluixerCalibration.interpolate(px, c.x, c.y) : bezierCoordinate(c.y, j / 400),
         d = Math.hypot(x - 24 - 240 * px, y - 136 + 120 * py);
       if (d < nearest) {
         nearest = d;
@@ -1646,7 +1751,7 @@ curveCanvas.addEventListener('click', (e) => {
     }
     if (!point) return;
     const i = c.x.findIndex((v) => v > point[0]);
-    if (i <= 0) return;
+    if (i <= 0 || (c.interpolation && Math.min(point[0] - c.x[i - 1], c.x[i] - point[0]) < 1e-6)) return;
     c.x.splice(i, 0, point[0]);
     c.y.splice(i, 0, point[1]);
     selectedPoint = i;
@@ -1678,7 +1783,6 @@ function followTubeResize() {
     tubeNames.some((n) => next[n] !== display.cylinder[n])
   )
     tubeCenter = display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2);
-  placementTube = { ...next };
 }
 function loadDisplay() {
   if (csvReading) return;
@@ -1694,14 +1798,17 @@ function loadDisplay() {
     if (previewQueued) {
       previewQueued = false;
       loadDisplay();
-    } else syncPlayback();
+    } else {
+      syncPlayback();
+      startCalibPreview();
+    }
   });
   return previewTask;
 }
 async function renderDisplay(current) {
   // Keep the CSV sequence and current progress when changing its preview path.
-  if (importedCsv) stopAnimation();
-  else resetAnimation();
+  if (importedCsv) stopAnimation(false);
+  else resetAnimation(false);
   tubeAvailability();
   $('spatial-fields').hidden = $('pattern-type').value !== 'spatial-brush';
   $('image-fields').hidden = $('pattern-type').value !== 'image';
@@ -1714,7 +1821,7 @@ async function renderDisplay(current) {
   $('project-open').disabled = true;
   status('', false, true);
   $('export-status').textContent = '';
-  for (const id of ['total', 'liquid-total', 'count']) $(id).textContent = '—';
+  for (const id of ['total', 'current-output-value', 'count']) $(id).textContent = '—';
   try {
     const requestedPattern = selectedPattern(),
       requestedCurve = selectedCurve(),
@@ -1738,6 +1845,13 @@ async function renderDisplay(current) {
       JSON.stringify(requestedPattern) !== JSON.stringify(data.pattern_config)
     )
       throw Error('Spatial brush result mismatch');
+    if (importedCsv?.standard) {
+      const previous = importedCsv;
+      const standard = await fetchStandardPattern(requestedCurve, requestedTube);
+      if (importedCsv !== previous || current !== requestId) return;
+      importedCsv = standardPreviewSequence(standard);
+      $('calibration-standard-status').textContent = `${standard.count} liquid segments · 100 steps each`;
+    }
     display = data;
     csvPreviewMetrics();
     const pending = current !== requestId;
@@ -1749,6 +1863,7 @@ async function renderDisplay(current) {
     draw();
   } catch (error) {
     if (current === requestId) {
+      if (importedCsv?.standard) clearCsvPreview();
       if (!placement) display = null;
       draw();
       status(error.message + '. Check the parameters or local server.', true);
@@ -1756,7 +1871,11 @@ async function renderDisplay(current) {
     }
   }
 }
-$('pattern-type').addEventListener('change', loadDisplay);
+$('pattern-type').addEventListener('change', () => {
+  spatialStroke = null;
+  canvas.style.cursor = $('pattern-type').value === 'spatial-brush' ? 'crosshair' : '';
+  loadDisplay();
+});
 $('reset').addEventListener('click', () => {
   endDrag();
   yaw = -0.55;
@@ -1837,6 +1956,20 @@ canvas.addEventListener('keydown', (e) => {
   requestViewDraw();
 });
 new ResizeObserver(requestViewDraw).observe(canvas);
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+}
+
 $('export-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!display || importedCsv || exporting || previewLoading) return;
@@ -1864,15 +1997,7 @@ $('export-form').addEventListener('submit', async (event) => {
       const error = await response.json();
       throw Error(error.error || 'Export failed');
     }
-    const blob = await response.blob(),
-      url = URL.createObjectURL(blob),
-      link = document.createElement('a');
-    link.href = url;
-    link.download = `fluixel_${data.unit}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    downloadBlob(await response.blob(), `fluixer_${data.unit}.csv`);
     $('export-status').textContent =
       `Generated ${response.headers.get('X-Row-Count')} rows. Browser download requested (${data.unit}).`;
   } catch (error) {
@@ -1880,6 +2005,7 @@ $('export-form').addEventListener('submit', async (event) => {
   } finally {
     exporting = false;
     $('export').disabled = !display || previewLoading;
+    startCalibPreview();
   }
 });
 const PROJECT_FORMAT = 'fluixer-project',
@@ -2090,7 +2216,7 @@ function restoreProject(project, data) {
   panX = project.view.pan_x * rect.width;
   panY = project.view.pan_y * rect.height;
   $('total').textContent = data.path_length.toFixed(2) + ' mm';
-  $('liquid-total').textContent = data.liquid_length.toFixed(2) + ' mm';
+  syncCurrentOutput();
   $('count').textContent = data.segments.length;
   $('export-status').textContent = '';
   status('');
@@ -2103,14 +2229,7 @@ $('project-save').addEventListener('click', () => {
     if (!$('export-form').reportValidity()) return;
     const project = currentProject(),
       blob = new Blob([JSON.stringify(project, null, 2) + '\n'], { type: 'application/json' });
-    const url = URL.createObjectURL(blob),
-      link = document.createElement('a');
-    link.href = url;
-    link.download = 'Fluixer-project.fluixer';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    downloadBlob(blob, 'Fluixer-project.fluixer');
     $('project-status').textContent = 'Project saved';
   } catch (error) {
     $('project-status').textContent = 'Save failed: ' + error.message;
@@ -2202,6 +2321,7 @@ $('project-file').addEventListener('change', async () => {
     $('step-apply').disabled = !stepDraft;
     $('export').disabled = !display || exporting || display.pattern_config.type === 'empty';
     $('project-save').disabled = !display;
+    startCalibPreview();
   }
 });
 
@@ -2832,14 +2952,7 @@ for (const event of ['pointerup', 'pointercancel', 'lostpointercapture'])
   canvas.addEventListener(event, () => {
     spatialStroke = null;
   });
-$('pattern-type').addEventListener('change', () => {
-  spatialStroke = null;
-  canvas.style.cursor = $('pattern-type').value === 'spatial-brush' ? 'crosshair' : '';
-});
 
-$('tube-type').addEventListener('change', () => {
-  spatialStroke = null;
-});
 window.addEventListener('blur', () => {
   spatialStroke = null;
 });
@@ -2860,8 +2973,14 @@ if (document.fonts) {
   });
 }
 
+const sidebarTabKeys = Array.from(document.querySelectorAll('.sidebar-tabs [role="tab"]'),
+  (button) => button.id.slice('tab-'.length));
+
 function selectSidebarTab(key, focus = false) {
-  for (const name of ['project', 'pattern', 'tube', 'export']) {
+  if ($('tab-' + key).disabled) return;
+  const enteringCalib = key === 'calibration' && $('panel-calibration').hidden;
+  const leavingCalib = key !== 'calibration' && !$('panel-calibration').hidden;
+  for (const name of sidebarTabKeys) {
     const button = $('tab-' + name),
       active = name === key;
     button.ariaSelected = String(active);
@@ -2869,18 +2988,38 @@ function selectSidebarTab(key, focus = false) {
     $('panel-' + name).hidden = !active;
     if (active && focus) button.focus();
   }
-  if (key === 'tube') drawCurve(curveState);
+  if (leavingCalib) {
+    calibPreviewPending = false;
+    if (calibPreviewReading || importedCsv?.standard) {
+      calibPreviewReading = false;
+      clearCsvPreview();
+      if (calibPreviousPreview) {
+        importedCsv = calibPreviousPreview.sequence;
+        animationProgress = calibPreviousPreview.progress;
+        csvPreviewMetrics();
+        syncPlayback();
+      }
+      draw();
+    }
+    calibPreviousPreview = null;
+  }
+  if (enteringCalib) {
+    calibPreviousPreview = importedCsv ? { sequence: importedCsv, progress: animationProgress } : null;
+    calibPreviewPending = true;
+    startCalibPreview();
+  }
+  if (key === 'calibration') drawCurve(curveState);
   if (key === 'pattern') {
     paintBrush();
     if (stepDraft) drawStepDraft();
   }
 }
 
-for (const key of ['project', 'pattern', 'tube', 'export']) {
+for (const key of sidebarTabKeys) {
   const button = $('tab-' + key);
   button.addEventListener('click', () => selectSidebarTab(key));
   button.addEventListener('keydown', (event) => {
-    const keys = ['project', 'pattern', 'tube', 'export'].filter((k) => !$('tab-' + k).hidden);
+    const keys = sidebarTabKeys.filter((k) => !$('tab-' + k).hidden && !$('tab-' + k).disabled);
     const index = keys.indexOf(key);
     const next =
       event.key === 'ArrowRight'
@@ -2905,16 +3044,20 @@ function syncCsvControls() {
   // Inert also locks canvas editors and prevents keyboard focus while previewing.
   const locked = !!importedCsv || csvReading;
   for (const group of document.querySelectorAll('.csv-edit-controls')) {
-    group.disabled = locked;
-    group.inert = locked;
+    const editableCompensation = !!importedCsv?.standard && !!group.closest('#geometry-compensation');
+    group.disabled = locked && !editableCompensation;
+    group.inert = group.disabled;
   }
   for (const group of document.querySelectorAll('.csv-tube-controls')) {
-    group.disabled = projectBusy || csvReading;
+    group.disabled = projectBusy || csvReading || !!importedCsv?.standard;
     group.inert = group.disabled;
   }
   syncPlaneTools();
   const busy = projectBusy || previewLoading || exporting || csvReading;
-  $('csv-import').disabled = !display || busy;
+  $('csv-import').disabled = !display || busy || !!importedCsv?.standard;
+  const standard = !!importedCsv?.standard;
+  const standardUnavailable = busy || !['cylinder', 's-curve'].includes($('tube-type').value) || (!!importedCsv && !standard);
+  $('calibration-standard').disabled = standardUnavailable;
   $('csv-preview-clear').hidden = !importedCsv;
   $('csv-preview-clear').disabled = busy;
   $('csv-import').setAttribute('aria-pressed', String(!!importedCsv));
@@ -2924,17 +3067,16 @@ function syncCsvControls() {
   }
 }
 function csvPreviewMetrics() {
+  syncCurrentOutput();
   if (!display) return;
   $('total').textContent = display.path_length.toFixed(2) + ' mm';
   if (importedCsv) {
     const windows = csvPreviewWindows(importedCsv, display.path_length, 1);
-    $('liquid-total').textContent = windows.reduce((s, [a, b]) => s + b - a, 0).toFixed(2) + ' mm';
     let count = 0, cursor = 0;
     for (const [a, b] of windows) { if (a > cursor) count++; count++; cursor = b; }
     if (cursor < display.path_length) count++;
     $('count').textContent = count;
   } else {
-    $('liquid-total').textContent = display.liquid_length.toFixed(2) + ' mm';
     $('count').textContent = display.segments.length;
   }
 }
@@ -2942,6 +3084,7 @@ function clearCsvPreview() {
   ++csvReadId;
   csvReading = false;
   importedCsv = null;
+  $('calibration-standard-status').textContent = '';
   $('csv-import-status').textContent = '';
   $('csv-import-status').removeAttribute('title');
   resetAnimation();
@@ -2980,8 +3123,111 @@ $('csv-file').addEventListener('change', async () => {
   } catch (error) {
     if (token === csvReadId) $('csv-import-status').textContent = 'Import failed: ' + error.message;
   } finally {
-    if (token === csvReadId) { csvReading = false; syncPlayback(); }
+    if (token === csvReadId) {
+      csvReading = false;
+      syncPlayback();
+      startCalibPreview();
+    }
   }
 });
 $('csv-preview-clear').addEventListener('click', () => { clearCsvPreview(); draw(); });
 syncCsvControls();
+
+
+FluixerCalibration.init({
+  locked: () => projectBusy || (!!importedCsv && !importedCsv.standard) || csvReading || !['cylinder', 's-curve'].includes($('tube-type').value),
+  syncSlider: syncSliderFill,
+  apply: (curve) => {
+    finishCurveDrag(null, true, true);
+    selectedPoint = null;
+    setCurve(validateCurve(curve));
+    selectSidebarTab('calibration');
+    $('curve-status').textContent = '';
+    loadDisplay();
+  },
+});
+
+
+// STANDARD_PREVIEW_START
+async function fetchStandardPattern(compensation = selectedCurve(), cylinder = selectedTube()) {
+  const payload = {
+    cylinder,
+    compensation,
+    speed: Number($('speed').value),
+    k_gas: Number($('k-gas').value),
+    pre_add: selectedPreAdd(),
+    length_per_100_steps: selectedStepLength(),
+  };
+  const response = await fetch('/api/calibration-standard', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw Error(error.error || 'Standard pattern failed');
+  }
+  return { source: await response.text(), count: Number(response.headers.get('X-Liquid-Count')), payload };
+}
+
+function standardPreviewSequence(standard) {
+  return { ...parsePreviewCsv(standard.source, {
+    kGas: standard.payload.k_gas, kLiquid: 625,
+    preAdd: standard.payload.pre_add,
+    lengthPer100Steps: standard.payload.length_per_100_steps,
+  }), standard };
+}
+
+async function startCalibPreview() {
+  if (!calibPreviewPending || $('panel-calibration').hidden || projectBusy || csvReading || exporting || previewLoading || !display) return;
+  if (!['cylinder', 's-curve'].includes($('tube-type').value)) return;
+  calibPreviewPending = false;
+  calibPreviewReading = true;
+  const token = ++csvReadId, sourceDisplay = display, sourceRequest = requestId;
+  csvReading = true;
+  $('calibration-standard-status').textContent = '';
+  syncPlayback();
+  try {
+    const standard = await fetchStandardPattern();
+    if (token !== csvReadId || $('panel-calibration').hidden || projectBusy) return;
+    if (sourceDisplay !== display || sourceRequest !== requestId) {
+      calibPreviewPending = true;
+      return;
+    }
+    stopAnimation();
+    importedCsv = standardPreviewSequence(standard);
+    animationProgress = 1;
+    $('calibration-standard-status').textContent = `${standard.count} liquid segments · 100 steps each`;
+    csvPreviewMetrics();
+    draw();
+  } catch (error) {
+    if (token === csvReadId) $('calibration-standard-status').textContent = error.message;
+  } finally {
+    if (token === csvReadId) {
+      calibPreviewReading = false;
+      csvReading = false;
+      syncPlayback();
+      startCalibPreview();
+    }
+  }
+}
+
+$('calibration-standard').addEventListener('click', async () => {
+  if (projectBusy || (importedCsv && !importedCsv.standard) || csvReading || exporting || previewLoading ||
+      !['cylinder', 's-curve'].includes($('tube-type').value)) return;
+  exporting = true;
+  syncCsvControls();
+  $('calibration-standard-status').textContent = '';
+  try {
+    // Export the exact sequence being previewed, if preview mode is active.
+    const standard = importedCsv?.standard || await fetchStandardPattern();
+    const blob = new Blob(['\ufeff', standard.source.replace(/^\uFEFF/, '')], { type: 'text/csv;charset=utf-8' });
+    downloadBlob(blob, 'fluixer_standard_100steps.csv');
+    $('calibration-standard-status').textContent = `${standard.count} liquid segments · 100 steps each`;
+  } catch (error) {
+    $('calibration-standard-status').textContent = error.message;
+  } finally {
+    exporting = false;
+    syncCsvControls();
+    startCalibPreview();
+  }
+});
+// STANDARD_PREVIEW_END

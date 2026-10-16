@@ -18,6 +18,7 @@ header {
   background: var(--bg);
 }
 .brand {
+  font-variation-settings: "ROND" 100;
   font-family: var(--f-display);
   font-weight: 500;
   font-size: 32px;
@@ -27,14 +28,13 @@ header {
 }
 main {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  max-width: auto;
+  grid-template-columns: 360px minmax(0, 1fr);
   margin: 0;
   min-height: calc(100vh - 80px);
 }
 aside {
   padding: 24px;
-  background: var(--glass);
+  /* background: var(--glass); */
   border-right: 1px solid var(--line);
   min-width: 0;
 }
@@ -124,7 +124,12 @@ select.inp {
 .inp:focus-visible {
   outline: 2px solid var(--primary);
 }
+/* Flat played fill tracks the thumb center, including its inset. */
 .slider {
+  background-color: var(--line-2);
+  background-image: linear-gradient(var(--display), var(--display));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
   display: block;
   margin: 16px 0;
   width: 100%;
@@ -159,7 +164,8 @@ select.inp {
 }
 .view-buttons {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
 }
 .viewport {
   position: relative;
@@ -222,16 +228,8 @@ canvas:active {
   padding: 24px 0;
   border-bottom: 1px solid var(--line);
 }
-.playback .pair {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 .playback select {
   max-width: 128px;
-}
-.playback label span {
-  float: right;
 }
 .metrics {
   display: grid;
@@ -254,7 +252,9 @@ canvas:active {
 .metrics strong {
   font-family: var(--f-display);
   font-weight: 500;
-  font-size: 32px;
+  font-size: clamp(20px, 2.3vw, 32px);
+  font-variant-numeric: tabular-nums;
+  font-variation-settings: "ROND" 100;
   color: var(--display);
   overflow-wrap: anywhere;
 }
@@ -274,7 +274,7 @@ canvas:active {
   width: 100%;
   height: 220px;
   aspect-ratio: 1;
-  background: var(--surface);
+  /* background: var(--surface); */
   border: 1px solid var(--line-2);
   border-radius: 0;
   cursor: default;
@@ -302,9 +302,6 @@ canvas:active {
   }
   .metrics {
     gap: 8px;
-  }
-  .metrics strong {
-    font-size: 24px;
   }
   .legend {
     gap: 8px;
@@ -350,32 +347,10 @@ canvas:active {
   }
 }
 
-
-.metrics strong {
-  font-size: clamp(20px, 2.3vw, 32px);
-  font-variant-numeric: tabular-nums;
-}
-
-.brand,
-.metrics strong {
-  font-family: var(--f-display);
-  font-weight: 500;
-  font-variation-settings: "ROND" 100;
-}
-
 /* === Projection controls === */
 #plane-toggle[aria-pressed="true"] {
   background: var(--display);
   color: var(--bg);
-}
-
-
-/* Flat played fill tracks the thumb center, including its inset. */
-.slider {
-  background-color: var(--line-2);
-  background-image: linear-gradient(var(--display), var(--display));
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
 }
 
 .view-status.loading::before {
@@ -412,19 +387,23 @@ canvas:active {
   background: var(--glass);
   border-radius: var(--r-md);
 }
-.view-tools .btn-icon {
+.view-tools .btn-icon,
+.view-bottom-tools .btn-icon {
   border-radius: var(--r-sm);
   background: var(--surface);
 }
-.view-tools .btn-icon[aria-pressed="true"] {
+.view-tools .btn-icon[aria-pressed="true"],
+.view-bottom-tools .btn-icon[aria-pressed="true"] {
   background: var(--display);
   color: var(--bg);
   border-color: var(--display);
 }
-.view-tools .btn-icon:hover {
+.view-tools .btn-icon:hover,
+.view-bottom-tools .btn-icon:hover {
   opacity: 0.8;
 }
-.view-tools .btn-icon:disabled {
+.view-tools .btn-icon:disabled,
+.view-bottom-tools .btn-icon:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -433,26 +412,6 @@ canvas:active {
   display: flex;
   gap: 8px;
   justify-content: center;
-  padding-top: 12px;
-}
-.view-bottom-tools .btn-icon {
-  border-radius: var(--r-sm);
-  background: var(--surface);
-}
-.view-bottom-tools .btn-icon[aria-pressed="true"] {
-  background: var(--display);
-  color: var(--bg);
-  border-color: var(--display);
-}
-.view-bottom-tools .btn-icon:hover {
-  opacity: 0.8;
-}
-.view-bottom-tools .btn-icon:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.view-bottom-tools {
   position: absolute;
   bottom: 16px;
   left: 50%;
@@ -504,7 +463,7 @@ canvas:active {
   margin: 20px 0 8px;
 }
 
-/* Desktop: aligned columns, independent controls scroll, fixed preview. */
+/* Desktop: aligned columns, compact sidebar panels, fixed preview. */
 @media (min-width: 621px) {
   html,
   body {
@@ -519,7 +478,6 @@ canvas:active {
   aside {
     height: 100%;
     min-height: 0;
-    overflow-y: auto;
     overscroll-behavior: contain;
   }
   article {
@@ -577,11 +535,6 @@ canvas:active {
 .render-modes .btn-icon {
   border-radius: var(--r-sm);
 }
-.view-buttons {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 .render-modes [aria-pressed="true"] {
   background: var(--ink, #111);
   color: var(--bg, #fff);
@@ -620,11 +573,11 @@ canvas:active {
   aspect-ratio: 1;
   display: block;
   border: 1px solid var(--line-2);
-  background: var(--bg, #fff);
+  /* background: var(--surface); */
 }
-#image-status:empty {
+/* #image-status:empty {
   display: none;
-}
+} */
 
 /* Keep native controls and status messages on the shared font roles. */
 button,
@@ -646,12 +599,12 @@ optgroup {
   font-weight: 400;
   font-style: normal;
 }
-/* input[type="number"] {
-  font-variant-numeric: tabular-nums;
-} */
+
 input[type="number"]::-webkit-inner-spin-button {
-  margin-right: -8px; 
+  margin-right: -6px; 
   font-variant-numeric: tabular-nums;
+  background: transparent;
+  mix-blend-mode: multiply;
 }
 /* The sidebar exposes one compact task panel at a time. */
 aside {
@@ -678,12 +631,34 @@ aside {
   font: 400 10px var(--f-mono);
   cursor: pointer;
 }
+/* Short divider between CSV and Calib; independent of tab order. */
+.sidebar-tabs #tab-export + #tab-calibration,
+.sidebar-tabs #tab-calibration + #tab-export {
+  position: relative;
+  margin-left: 10px;
+}
+.sidebar-tabs #tab-export + #tab-calibration::before,
+.sidebar-tabs #tab-calibration + #tab-export::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 1px;
+  height: 12px;
+  transform: translateY(-50%);
+  background: var(--line);
+  pointer-events: none;
+}
 .sidebar-tabs button[aria-selected="true"] {
   background: var(--display);
   color: var(--bg);
 }
-.sidebar-tabs button:hover {
+.sidebar-tabs button:hover:not(:disabled) {
   opacity: 0.7;
+}
+.sidebar-tabs button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 .sidebar-tabs [hidden],
 .sidebar-panel[hidden] {
@@ -703,9 +678,6 @@ aside {
 }
 .sidebar-panel label {
   margin: 10px 0 10px;
-}
-.sidebar-panel .slider {
-  margin: 16px 0;
 }
 .sidebar-panel .pair {
   gap: 8px;
@@ -759,25 +731,58 @@ aside {
   }
 }
 
-/* === Inline geometry compensation === */
-#panel-tube #geometry-compensation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 5px 12px;
-  margin-top: 16px;
+/* === Calibration panel === */
+.sidebar-panel .visual-calibration-launch {
+  margin-top: 20px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-#panel-tube #geometry-compensation[hidden] {
-  display: none;
+/* Both Visual Calibration actions fill the same available row. */
+.visual-calibration-launch > .btn,
+.visual-calibration-launch .standard-leveling-actions > .btn {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
 }
-#geometry-compensation h2 {
+#calibration-dialog {
+  box-sizing: border-box;
+  width: min(1080px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: var(--primary);
+}
+#calibration-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.calibration-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.calibration-dialog-heading h2 { margin: 0; }
+.calibration-dialog-content { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 24px; }
+.calibration-photo-area { min-width: 0; min-height: 220px; display: grid; place-items: center; background: var(--surface); }
+#calibration-photo { display: block; width: auto; height: auto; max-width: 100%; max-height: min(680px, calc(100dvh - 160px)); cursor: crosshair; }
+#calibration-photo[hidden] { display: none; }
+.calibration-photo-controls { min-width: 0; }
+.calibration-photo-controls label { margin: 10px 0 6px; }
+.calibration-thresholds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 12px; }
+.calibration-thresholds .slider-number-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: center; gap: 4px; }
+.calibration-thresholds .inp { width: 100%; min-width: 0; padding: 6px 3px; border-radius: var(--r-md); }
+.calibration-thresholds .slider { margin: 12px 0; }
+.calibration-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+#calibration-result { display: block; font: 11px var(--f-mono); line-height: 1.6; }
+#calibration-error { color: var(--error); font: 12px var(--f-mono); line-height: 1.5; }
+#calibration-error:empty { display: none; }
+#calibration-apply { margin-top: 12px; width: 100%; }
+@media (max-width: 700px) {
+  .calibration-dialog-content { grid-template-columns: minmax(0, 1fr); }
+  #calibration-photo { max-height: 40dvh; }
+}
+/* #geometry-compensation h2 {
   grid-column: 1/-1;
   font-size: 14px;
-}
-#panel-tube #curve-preview {
-  grid-column: 1;
-  grid-row: auto;
+} */
+#panel-calibration #curve-preview {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
@@ -785,9 +790,7 @@ aside {
 }
 #geometry-compensation label,
 #geometry-compensation input,
-#geometry-compensation button,
 #geometry-compensation p {
-  grid-column: 1;
   margin: 8px 0 0 0;
 }
 #geometry-compensation #curve-status:empty {
@@ -805,10 +808,6 @@ aside {
     min-height: 28px;
     padding: 3px 8px;
   }
-  #panel-tube #geometry-compensation {
-    margin-top: 8px;
-    padding-top: 8px;
-  }
 }
 
 /* Sidebar reset actions beside their section titles. */
@@ -817,8 +816,7 @@ aside {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  grid-column: 1 / -1;
-  margin: 12px 0 10px;
+  margin: 12px 0 12px;
 }
 .sidebar-panel .sidebar-section-heading h2 {
   min-width: 0;
@@ -831,7 +829,7 @@ aside {
   min-height: 16px;
   padding: 0;
   margin: 0;
-  border-radius: var(--r-sm);
+  /* border-radius: var(--r-sm); */
   border: 0;
 }
 .sidebar-reset .ico {
@@ -896,3 +894,49 @@ aside {
 .csv-tube-controls:disabled {
   opacity: 0.4;
 }
+
+/* Standard leveling command export shares the Calibration panel. */
+.standard-leveling-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 8px;
+}
+.standard-leveling-actions .btn {
+  min-width: 0;
+  padding-inline: 8px;
+}
+#calibration-standard-status { font: 11px var(--f-mono); line-height: 1.4; }
+#calibration-standard-status:empty { display: none; }
+@media (max-height: 800px) {
+  #panel-calibration #curve-preview {
+    width: min(100%, clamp(100px, calc(100dvh - 510px), 280px));
+    margin-inline: auto;
+  }
+}
+
+/* Keep the unit anchored while the command type and digit count change. */
+#current-output {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 20px;
+  white-space: nowrap;
+}
+.metrics #current-output-value {
+  flex: 0 0 6ch;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.metrics #current-output-unit {
+  flex: 0 0 auto;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.calibration-parameters-heading { margin-top: 16px; }
+.calibration-parameters-heading h2 { margin: 0; font: inherit; }
