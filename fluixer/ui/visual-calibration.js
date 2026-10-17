@@ -227,6 +227,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
       $('apply').disabled = locked(); $('download').disabled = locked();
     } catch (error) { $('error').textContent = error.message; }
     paint();
+    commitPhotoHistory();
   }
   function schedule() {
     clearTimeout(timer); result = null; $('apply').disabled = true; $('download').disabled = true;
@@ -293,5 +294,43 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     const csv = 'point_id,x_px,y_px,offset_mm\r\n' + result.rows.map(r => [r.point_id, r.x_px.toFixed(3), r.y_px.toFixed(3), r.offset_mm.toFixed(6)].join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), link = document.createElement('a');
     link.href = url; link.download = 'fluixer-calibration.csv'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  // The photo dialog owns a separate undo stack; applying a curve is one main-project edit.
+  function capturePhotoEdit() {
+    return { photo, baseSettings: { ...baseSettings }, manual: structuredClone(manual),
+      mode: $('mode').value, values: keys.map(id => $(id).value) };
+  }
+  const photoHistory = new FluixerHistory.History({
+    capture: capturePhotoEdit,
+    equal: (a, b) => a.photo === b.photo && JSON.stringify({ ...a, photo: null }) === JSON.stringify({ ...b, photo: null }),
+    restore: state => {
+      ++readId; reading = false; clearTimeout(timer);
+      photo = state.photo; baseSettings = { ...state.baseSettings }; manual = structuredClone(state.manual);
+      $('mode').value = state.mode;
+      keys.forEach((id, index) => { $(id).value = state.values[index]; $(id + '-slider').value = state.values[index]; syncSlider($(id + '-slider')); });
+      canvas.hidden = !photo; refresh();
+    },
+  });
+  let photoPointer = null;
+  function commitPhotoHistory() { if (!reading && !locked()) photoHistory.checkpoint(); }
+  dialog.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || reading || locked()) return;
+    photoHistory.begin(); photoPointer = event.pointerId;
+  }, true);
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) document.addEventListener(name, event => {
+    if (event.pointerId !== photoPointer) return;
+    photoPointer = null;
+    queueMicrotask(() => { photoHistory.held = false; commitPhotoHistory(); });
+  });
+  window.addEventListener('blur', () => {
+    photoPointer = null;
+    queueMicrotask(() => { photoHistory.held = false; commitPhotoHistory(); });
+  });
+  for (const name of ['change', 'click']) dialog.addEventListener(name, () => queueMicrotask(commitPhotoHistory));
+  dialog.addEventListener('keydown', event => {
+    const action = FluixerHistory.shortcut(event);
+    if (!action) return;
+    event.preventDefault(); event.stopPropagation();
+    if (!event.repeat && !reading && !locked()) photoHistory.move(action === 'redo');
   });
 };

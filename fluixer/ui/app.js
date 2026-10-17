@@ -1,3 +1,5 @@
+let editHistory = null, imageHistoryPending = 0;
+let compensatedPreview = false;
 let importedCsv = null, csvReadId = 0, csvReading = false;
 let calibPreviewPending = false, calibPreviewReading = false, calibPreviousPreview = null;
 let animatedCache = null, viewDrawFrame = null;
@@ -9,7 +11,6 @@ function requestViewDraw() {
   });
 }
 let spatialWindows = [],
-  spatialUndo = [],
   spatialErase = false,
   spatialStroke = null;
 function uiColor(name, fallback) {
@@ -25,7 +26,7 @@ const $ = (id) => document.getElementById(id),
 let renderMode = 'lines',
   innerDiameter = 2,
   tubeRenderer = null;
-let planeVisible = true,
+let planeVisible = false,
   tubeCenter = null;
 let initialPlacement = null,
   placement = null,
@@ -510,7 +511,7 @@ function draw() {
   // World-axis triad uses the same projection as the geometry, never mirrors data.
   const center = modelFrame().center,
     origin = projectPoint(center),
-    anchor = [rect.width - 50, 48];
+    anchor = [rect.width - 50, rect.height - 48];
   ctx.font = canvasFont(10);
   ctx.lineWidth = 1.5;
   for (const [point, label, color] of [
@@ -967,6 +968,7 @@ function rasterImage(bitmap) {
 }
 async function processImage() {
   if (!imageRaster) return;
+  imageHistoryPending++;
   const id = ++imageProcessId,
     read = imageReadId,
     mode = $('image-mode').value;
@@ -1033,6 +1035,9 @@ async function processImage() {
   } catch (error) {
     if (read === imageReadId && id === imageProcessId)
       $('image-status').textContent = error.message;
+  } finally {
+    imageHistoryPending--;
+    commitEditHistory();
   }
 }
 $('image-open').addEventListener('click', () => $('image-file').click());
@@ -1118,7 +1123,14 @@ function sameStep(a, b) {
     ['width', 'height', 'x', 'z'].every((n) => a[n] === b[n])
   );
 }
-function fetchDisplay(shape, curve, tube) {
+function uncompensatedPreviewCurve() {
+  return { amplitude: 0, x: [0, 1 / 3, 2 / 3, 1], y: [0, 0, 0, 0] };
+}
+function previewCurveFor(curve, tube) {
+  return compensatedPreview && ['cylinder', 's-curve'].includes(tube.type || 'cylinder')
+    ? curve : uncompensatedPreviewCurve();
+}
+function fetchDisplay(shape, tube, curve = uncompensatedPreviewCurve()) {
   if (
     tube.type === 'custom-step' ||
     ['step', 'brush', 'image', 'empty', 'spatial-brush'].includes(shape.type)
@@ -1267,7 +1279,6 @@ syncSliderFill($('brush-size'));
 const BRUSH_SIZE = 256,
   brushControls = ['brush-pen', 'brush-eraser', 'brush-size', 'brush-undo', 'brush-clear'];
 let brushPixels = new Uint8Array(BRUSH_SIZE * BRUSH_SIZE),
-  brushHistory = [],
   brushActive = null,
   brushStroke = null,
   brushErase = false;
@@ -1328,7 +1339,7 @@ function paintBrush() {
       }
     }
   }
-  $('brush-undo').disabled = !brushHistory.length || projectBusy;
+  syncHistoryButtons();
 }
 function updateBrushPreview() {
   if (projectBusy || $('pattern-type').value !== 'brush') return;
@@ -1359,7 +1370,7 @@ function updateBrushPreview() {
     previewQueued = false;
     display = null;
     draw();
-    $('export').disabled = true;
+    setExportDisabled(true);
     $('project-save').disabled = true;
     $('brush-status').textContent = e.message;
   }
@@ -1397,10 +1408,6 @@ function finishBrush(cancel = false, silent = false) {
   const stroke = brushStroke;
   brushStroke = null;
   if (cancel) brushPixels = stroke.before;
-  else {
-    brushHistory.push(stroke.before);
-    if (brushHistory.length > 30) brushHistory.shift();
-  }
   if (brushCanvas.hasPointerCapture(stroke.id)) brushCanvas.releasePointerCapture(stroke.id);
   paintBrush();
   if (!silent) updateBrushPreview();
@@ -1453,21 +1460,11 @@ $('brush-eraser').addEventListener('click', () => {
   $('brush-pen').ariaPressed = 'false';
   $('brush-eraser').ariaPressed = 'true';
 });
-$('brush-undo').addEventListener('click', () => {
-  if (projectBusy) return;
-  finishBrush(true);
-  if (brushHistory.length) {
-    brushPixels = brushHistory.pop();
-    paintBrush();
-    updateBrushPreview();
-  }
-});
+$('brush-undo').addEventListener('click', () => moveEditHistory());
 $('brush-clear').addEventListener('click', () => {
   if (projectBusy) return;
   finishBrush(true);
   if (brushPixels.some((v) => v)) {
-    brushHistory.push(brushPixels.slice());
-    if (brushHistory.length > 30) brushHistory.shift();
     brushPixels.fill(0);
     paintBrush();
     updateBrushPreview();
@@ -1476,7 +1473,7 @@ $('brush-clear').addEventListener('click', () => {
 function restoreBrush(shape) {
   finishBrush(true, true);
   brushPixels = Uint8Array.from(JSON.parse(shape.source).rows.join(''), (v) => Number(v));
-  brushHistory = [];
+
   brushActive = shape;
   paintBrush();
   $('brush-status').textContent = '';
@@ -1786,7 +1783,8 @@ function followTubeResize() {
 }
 function loadDisplay() {
   if (csvReading) return;
-  followTubeResize();
+  if (!editHistory?.restoring) followTubeResize();
+  commitEditHistory();
   ++requestId;
   if (previewLoading) {
     previewQueued = true;
@@ -1816,7 +1814,7 @@ async function renderDisplay(current) {
   $('step-fields').hidden = $('pattern-type').value !== 'step';
   syncPlayback();
   draw();
-  $('export').disabled = true;
+  setExportDisabled(true);
   $('project-save').disabled = true;
   $('project-open').disabled = true;
   status('', false, true);
@@ -1826,17 +1824,18 @@ async function renderDisplay(current) {
     const requestedPattern = selectedPattern(),
       requestedCurve = selectedCurve(),
       requestedTube = selectedTube();
-    const response = await fetchDisplay(requestedPattern, requestedCurve, requestedTube);
+    const previewCurve = previewCurveFor(requestedCurve, requestedTube);
+    const response = await fetchDisplay(requestedPattern, requestedTube, previewCurve);
     const data = await response.json();
     if (!response.ok) throw Error(data.error || 'Calculation failed');
-    if (current !== requestId && !previewQueued) return;
+    if (current !== requestId) return;
     if (requestedPattern.type === 'image' && !sameImage(requestedPattern, data.pattern_config))
       throw Error('Image result mismatch');
     if (requestedPattern.type === 'brush' && !sameBrush(requestedPattern, data.pattern_config))
       throw Error('Brush result mismatch');
     if (requestedPattern.type === 'step' && !sameStep(requestedPattern, data.pattern_config))
       throw Error('STEP result does not match the current pattern');
-    if (!sameCurve(requestedCurve, data.compensation))
+    if (!sameCurve(previewCurve, data.compensation))
       throw Error('Compensation parameter response mismatch. Restart the local server');
     if (!sameTube(requestedTube, data.cylinder || DEFAULT_TUBE))
       throw Error('Tube parameter response mismatch. Restart the server');
@@ -1856,7 +1855,7 @@ async function renderDisplay(current) {
     csvPreviewMetrics();
     const pending = current !== requestId;
     status('', false, pending);
-    $('export').disabled = exporting || pending || requestedPattern.type === 'empty';
+    setExportDisabled(exporting || pending || requestedPattern.type === 'empty');
     $('project-save').disabled = pending;
     $('project-open').disabled = pending;
     syncPlayback();
@@ -1973,12 +1972,13 @@ function downloadBlob(blob, filename) {
 $('export-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!display || importedCsv || exporting || previewLoading) return;
+  const compensated = event.submitter?.id !== 'export-original';
   exporting = true;
-  $('export').disabled = true;
+  setExportDisabled(true);
   try {
     const data = {
       cylinder: display.cylinder || DEFAULT_TUBE,
-      compensation: display.compensation || DEFAULT_CURVE,
+      compensation: compensated ? selectedCurve() : uncompensatedPreviewCurve(),
       pattern: display.pattern_config || { type: 'captured-s' },
       pre_add: selectedPreAdd(),
       length_per_100_steps: selectedStepLength(),
@@ -1997,14 +1997,14 @@ $('export-form').addEventListener('submit', async (event) => {
       const error = await response.json();
       throw Error(error.error || 'Export failed');
     }
-    downloadBlob(await response.blob(), `fluixer_${data.unit}.csv`);
+    downloadBlob(await response.blob(), `fluixer_${compensated ? 'compensated' : 'original'}_${data.unit}.csv`);
     $('export-status').textContent =
       `Generated ${response.headers.get('X-Row-Count')} rows. Browser download requested (${data.unit}).`;
   } catch (error) {
     $('export-status').textContent = 'Export failed: ' + error.message;
   } finally {
     exporting = false;
-    $('export').disabled = !display || previewLoading;
+    setExportDisabled(!display || previewLoading);
     startCalibPreview();
   }
 });
@@ -2116,7 +2116,7 @@ function currentProject() {
     format: PROJECT_FORMAT,
     schema_version: PROJECT_SCHEMA_VERSION,
     pattern: shape.type === 'empty' ? { type: $('pattern-type').value, source: null } : shape,
-    compensation: display.compensation,
+    compensation: selectedCurve(),
     cylinder: {
       ...tube,
       type: tube.type || 'cylinder',
@@ -2152,7 +2152,7 @@ function restoreProject(project, data) {
     throw Error('Brush result mismatch');
   if (pattern.type === 'step' && !sameStep(project.pattern, data.pattern_config))
     throw Error('STEP result mismatch');
-  if (!sameCurve(project.compensation, data.compensation))
+  if (!sameCurve(previewCurveFor(project.compensation, project.cylinder), data.compensation))
     throw Error('Compensation parameter response mismatch');
   if (!sameTube(project.cylinder, data.cylinder || DEFAULT_TUBE))
     throw Error('Tube parameter response mismatch');
@@ -2172,7 +2172,7 @@ function restoreProject(project, data) {
   $('spatial-fields').hidden = shape.type !== 'spatial-brush';
   if (shape.type === 'spatial-brush') {
     spatialWindows = shape.windows.map((w) => w.slice());
-    spatialUndo = [];
+
   }
   tubeAvailability();
   $('image-fields').hidden = shape.type !== 'image';
@@ -2269,6 +2269,7 @@ $('project-file').addEventListener('change', async () => {
     'project-open',
     'project-save',
     'export',
+    'export-original',
     'pre-add',
     'length-per-100-steps',
     'speed',
@@ -2296,12 +2297,13 @@ $('project-file').addEventListener('change', async () => {
     }
     const response = await fetchDisplay(
         projectPatternPayload(project.pattern),
-        project.compensation,
         project.cylinder,
+        previewCurveFor(project.compensation, project.cylinder),
       ),
       data = await response.json();
     if (!response.ok) throw Error(data.error || 'Project calculation failed');
     restoreProject(project, data);
+    editHistory?.reset();
     if (parsedStep) {
       stepDraft = { source: project.pattern.source, parsed: parsedStep };
       drawStepDraft();
@@ -2319,7 +2321,7 @@ $('project-file').addEventListener('change', async () => {
     tubeAvailability();
     paintBrush();
     $('step-apply').disabled = !stepDraft;
-    $('export').disabled = !display || exporting || display.pattern_config.type === 'empty';
+    setExportDisabled(!display || exporting || display.pattern_config.type === 'empty');
     $('project-save').disabled = !display;
     startCalibPreview();
   }
@@ -2624,7 +2626,7 @@ function syncPlaneTools() {
     ['tool-direction', 'direction'],
   ]) {
     $(id).ariaPressed = String(!!placement && planeVisible && $('plane-tool').value === mode);
-    $(id).disabled = projectBusy || !!importedCsv || csvReading;
+    $(id).disabled = !placement || !planeVisible || projectBusy || !!importedCsv || csvReading;
   }
   $('plane-reset').disabled = projectBusy || !!importedCsv || csvReading;
   $('plane-toggle').ariaPressed = String(!!placement && planeVisible);
@@ -2634,14 +2636,14 @@ for (const [id, mode] of [
   ['tool-direction', 'direction'],
 ])
   $(id).addEventListener('click', () => {
-    if (projectBusy || importedCsv || csvReading) return;
-    planeVisible = true;
+    if (!placement || !planeVisible || projectBusy || importedCsv || csvReading) return;
     $('plane-tool').value = mode;
     syncPlaneTools();
     draw();
   });
 $('plane-toggle').addEventListener('click', () => {
   planeVisible = !planeVisible;
+  if (planeVisible) $('plane-tool').value = 'gumball';
   syncPlaneTools();
   draw();
 });
@@ -2853,7 +2855,7 @@ function syncSpatialControls() {
   $('spatial-pen').ariaPressed = String(!spatialErase);
   $('spatial-eraser').ariaPressed = String(spatialErase);
   for (const id of ['spatial-pen', 'spatial-eraser', 'spatial-size']) $(id).disabled = projectBusy;
-  $('spatial-undo').disabled = projectBusy || !spatialUndo.length;
+  syncHistoryButtons();
   $('spatial-clear').disabled = projectBusy || !spatialWindows.length;
   syncSliderFill($('spatial-size'));
 }
@@ -2869,16 +2871,9 @@ $('spatial-eraser').addEventListener('click', () => {
   $('spatial-pen').ariaPressed = 'false';
   $('spatial-eraser').ariaPressed = 'true';
 });
-$('spatial-undo').addEventListener('click', () => {
-  if (projectBusy) return;
-  if (spatialUndo.length) {
-    spatialWindows = spatialUndo.pop();
-    loadDisplay();
-  }
-});
+$('spatial-undo').addEventListener('click', () => moveEditHistory());
 $('spatial-clear').addEventListener('click', () => {
   if (projectBusy || !spatialWindows.length) return;
-  spatialUndo.push(spatialWindows.map((w) => w.slice()));
   spatialWindows = [];
   loadDisplay();
 });
@@ -2899,8 +2894,6 @@ canvas.addEventListener(
     stopAnimation();
     animationProgress = 1;
     const rect = canvas.getBoundingClientRect();
-    spatialUndo.push(spatialWindows.map((w) => w.slice()));
-    if (spatialUndo.length > 50) spatialUndo.shift();
     spatialStroke = {
       id: e.pointerId,
       rect,
@@ -3039,12 +3032,29 @@ for (const key of sidebarTabKeys) {
 }
 selectSidebarTab('pattern');
 
+function setExportDisabled(disabled) {
+  $('export').disabled = disabled;
+  $('export-original').disabled = disabled;
+}
+function syncCompensationPreview() {
+  const standard = !!importedCsv?.standard;
+  const supported = ['cylinder', 's-curve'].includes($('tube-type').value);
+  $('view-compensated').setAttribute('aria-pressed', String(standard || (supported && compensatedPreview)));
+  $('view-compensated').disabled = !supported || !!importedCsv || csvReading || projectBusy || exporting || previewLoading;
+}
+$('view-compensated').addEventListener('click', () => {
+  if ($('view-compensated').disabled) return;
+  compensatedPreview = !compensatedPreview;
+  loadDisplay();
+});
+
 function syncCsvControls() {
+  syncCompensationPreview();
   // A disabled fieldset preserves each control's own enabled/disabled state.
   // Inert also locks canvas editors and prevents keyboard focus while previewing.
   const locked = !!importedCsv || csvReading;
   for (const group of document.querySelectorAll('.csv-edit-controls')) {
-    const editableCompensation = !!importedCsv?.standard && !!group.closest('#geometry-compensation');
+    const editableCompensation = !!importedCsv?.standard && !!group.closest('#geometry-compensation, #calibration-dialog');
     group.disabled = locked && !editableCompensation;
     group.inert = group.disabled;
   }
@@ -3062,7 +3072,7 @@ function syncCsvControls() {
   $('csv-preview-clear').disabled = busy;
   $('csv-import').setAttribute('aria-pressed', String(!!importedCsv));
   if (importedCsv) {
-    $('export').disabled = true;
+    setExportDisabled(true);
     $('project-save').disabled = true;
   }
 }
@@ -3089,7 +3099,7 @@ function clearCsvPreview() {
   $('csv-import-status').removeAttribute('title');
   resetAnimation();
   csvPreviewMetrics();
-  $('export').disabled = !display || exporting || projectBusy || previewLoading || display.pattern_config?.type === 'empty';
+  setExportDisabled(!display || exporting || projectBusy || previewLoading || display.pattern_config?.type === 'empty');
   $('project-save').disabled = !display || projectBusy || previewLoading || display.pattern_config?.type === 'empty';
   syncCsvControls();
 }
@@ -3231,3 +3241,97 @@ $('calibration-standard').addEventListener('click', async () => {
   }
 });
 // STANDARD_PREVIEW_END
+
+// Model edits have their own snapshots; camera and playback are intentionally absent.
+const editFieldIds = [
+  'pattern-type', 'tube-type', 'mapping-type', ...tubeNames.map(n => 'tube-' + n),
+  'pre-add', 'length-per-100-steps', 'speed', 'k-gas', 'k-liquid', 'unit',
+  'image-mode', 'image-threshold', 'image-invert',
+];
+function captureEditState() {
+  return {
+    fields: Object.fromEntries(editFieldIds.map(id => [id, { value: $(id).value, checked: $(id).checked }])),
+    curve: { ...structuredClone(curveState), amplitude: $('curve-amplitude').value },
+    center: structuredClone(tubeCenter), placement: clonePlane(placement), initialPlacement: clonePlane(initialPlacement),
+    tubeStepSource, tubeStepReverse, innerDiameter,
+    brushPixels: brushPixels.slice(), brushActive: structuredClone(brushActive),
+    spatialWindows: structuredClone(spatialWindows), stepActive: structuredClone(stepActive), stepPlacement: structuredClone(stepPlacement),
+    imageActive: structuredClone(imageActive), imageRaster, imagePhoto, imagePhotoSource,
+  };
+}
+function sameEditState(a, b) {
+  if (a.imageRaster !== b.imageRaster || a.imagePhotoSource !== b.imagePhotoSource) return false;
+  // ImageData is immutable here. Comparing it pixel-by-pixel on every edit is unnecessary.
+  const content = s => JSON.stringify({ ...s, imageRaster: null, imagePhoto: null, brushPixels: Array.from(s.brushPixels) });
+  return content(a) === content(b);
+}
+function restoreEditState(s) {
+  ++requestId; ++imageReadId; ++imageProcessId; ++stepReadId; ++tubeStepReadId;
+  imagePhotoPending = null;
+  for (const [id, field] of Object.entries(s.fields)) {
+    $(id).value = field.value;
+    if (typeof field.checked === 'boolean') $(id).checked = field.checked;
+  }
+  tubeKind = $('tube-type').value;
+  tubeCenter = structuredClone(s.center); placement = clonePlane(s.placement); initialPlacement = clonePlane(s.initialPlacement);
+  tubeStepSource = s.tubeStepSource; tubeStepReverse = s.tubeStepReverse;
+  $('tube-step-reverse').ariaPressed = String(tubeStepReverse);
+  innerDiameter = s.innerDiameter;
+  selectedPoint = null;
+  setCurve({ ...structuredClone(s.curve), amplitude: Number(s.curve.amplitude) });
+  brushPixels = s.brushPixels.slice(); brushActive = structuredClone(s.brushActive);
+  spatialWindows = structuredClone(s.spatialWindows);
+  stepActive = structuredClone(s.stepActive); stepPlacement = structuredClone(s.stepPlacement); stepDraft = null;
+  $('step-apply').disabled = true;
+  imageActive = structuredClone(s.imageActive); imageRaster = s.imageRaster;
+  imagePhoto = s.imagePhoto; imagePhotoSource = s.imagePhotoSource;
+  for (const n of tubeNames) $('tube-slider-' + n).value = $('tube-' + n).value;
+  canvas.style.cursor = $('pattern-type').value === 'spatial-brush' ? 'crosshair' : '';
+  tubeLabels(); paintBrush(); paintImage(); syncRenderControls(); syncPlaneTools();
+  document.querySelectorAll('input[type="range"]').forEach(syncSliderFill);
+  loadDisplay();
+}
+function commitEditHistory() {
+  if (!editHistory || projectBusy || csvReading || imageHistoryPending) return;
+  editHistory.checkpoint();
+}
+function syncHistoryButtons() {
+  if (!editHistory) return;
+  const disabled = projectBusy || csvReading || !editHistory.available();
+  $('brush-undo').disabled = disabled;
+  $('spatial-undo').disabled = disabled;
+}
+function moveEditHistory(redo = false) {
+  if (!editHistory || projectBusy || csvReading || stepBusy || exporting || imageHistoryPending) return;
+  editHistory.move(redo);
+}
+editHistory = new FluixerHistory.History({
+  capture: captureEditState, restore: restoreEditState, equal: sameEditState,
+  scope: () => importedCsv && !importedCsv.standard ? importedCsv : null,
+  changed: syncHistoryButtons,
+});
+let editPointer = null;
+document.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || event.target.closest('dialog') || projectBusy || csvReading || imageHistoryPending) return;
+  if (!event.target.matches('input[type="range"], #brush-canvas, #curve-preview, #preview')) return;
+  editHistory.held = true; editPointer = event.pointerId;
+}, true);
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) document.addEventListener(name, event => {
+  if (event.pointerId !== editPointer) return;
+  editPointer = null;
+  queueMicrotask(() => { editHistory.held = false; commitEditHistory(); });
+});
+window.addEventListener('blur', () => {
+  editPointer = null;
+  queueMicrotask(() => { editHistory.held = false; commitEditHistory(); });
+});
+for (const name of ['change', 'click']) document.addEventListener(name, event => {
+  if (!event.target.closest('dialog')) queueMicrotask(commitEditHistory);
+});
+document.addEventListener('keydown', event => {
+  const action = FluixerHistory.shortcut(event);
+  if (!action || document.querySelector('dialog[open]')) return;
+  event.preventDefault();
+  if (!event.repeat) moveEditHistory(action === 'redo');
+});
+syncHistoryButtons();

@@ -1,0 +1,20 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const {History,shortcut}=require('../fluixer/ui/history.js');
+const nodes={},docEvents={};
+function node(id){return nodes[id]??={value:'50',hidden:false,disabled:false,handlers:{},addEventListener(n,f){(this.handlers[n]??=[]).push(f)},getContext(){return {putImageData(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},setLineDash(){},arc(){},fill(){}}},getBoundingClientRect(){return {left:0,top:0,width:100,height:100}},showModal(){},close(){}};}
+const c={window:{addEventListener(){}},document:{getElementById:node,addEventListener:(n,f)=>docEvents[n]=f},FluixerHistory:{History,shortcut},structuredClone,clearTimeout(){},setTimeout:()=>1,queueMicrotask:f=>f()};
+vm.createContext(c);
+let src=fs.readFileSync(require('node:path').join(__dirname,'../fluixer/ui/visual-calibration.js'),'utf8');
+const end=src.lastIndexOf('};');src=src.slice(0,end)+`window.photoTest={history:photoHistory,capture:capturePhotoEdit,refresh,setPhoto:p=>{photo=p;},};\n`+src.slice(end);
+vm.runInContext(src,c);
+const api=c.window.FluixerCalibration;
+api.detect=()=>[{x:2,y:2},{x:3,y:8}];api.cylinderScale=()=>({left:0,right:80,y:5,mmPerPixel:1});api.measurement=pts=>({center:2,curve:{amplitude:1},rows:pts});
+api.init({locked:()=>false,syncSlider(){},apply(){}});
+const t=c.window.photoTest;node('calibration-mode').value='manual';t.setPhoto({width:100,height:100,data:[]});t.refresh();t.history.reset();
+const click=node('calibration-photo').handlers.click[0];click({clientX:30,clientY:40});
+assert.equal(t.capture().manual.length,1);assert.equal(t.history.undo.length,1);
+t.history.move();assert.equal(t.capture().manual.length,0);t.history.move(true);assert.equal(t.capture().manual.length,1);
+t.history.begin();node('calibration-sensitivity').value='60';t.refresh();node('calibration-sensitivity').value='70';t.refresh();t.history.end();
+assert.equal(t.history.undo.length,2);t.history.move();assert.equal(node('calibration-sensitivity').value,'50');
+let prevented=false;node('calibration-dialog').handlers.keydown[0]({key:'z',ctrlKey:true,target:{closest:()=>null},preventDefault(){prevented=true},stopPropagation(){}});assert(prevented);assert.equal(t.capture().manual.length,0);
+console.log('PASS: photo marker undo/redo, slider grouping, isolated shortcut handling.');
