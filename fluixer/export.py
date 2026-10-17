@@ -18,7 +18,7 @@ def build_rows(values, liquid_gas, machine=MachineParameters(), unit='steps'):
 
     k values are manual adjustments with the existing multiplicative k/625
     interpretation. Input physical units remain unresolved; do not assume mm/ms.
-    Preserve fractional steps, integer truncation of speed/k, minimum one,
+    Round final steps with Python round; preserve integer truncation of speed/k, minimum one,
     and per-input splitting. Additional validation rejects malformed input.
     """
     unit = str(unit).strip().lower()
@@ -46,6 +46,8 @@ def build_rows(values, liquid_gas, machine=MachineParameters(), unit='steps'):
             total = 1
         if unit == 'segments':
             total = max(1, int(total * 3 / 200 + 0.5))
+        else:
+            total = max(1, round(total))
         limit = 2000 if unit == 'steps' else 89
         # Prevent accidental unbounded materialization in the standalone API.
         if len(rows) + math.ceil(total / limit) > 1_000_000:

@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/style.css" />
     <script src="/tube-renderer.js" defer></script>
     <script src="/image-input.js" defer></script>
+    <script src="/visual-calibration.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -46,6 +47,16 @@
             tabindex="-1"
           >
             Tube
+          </button>
+          <button
+            id="tab-calibration"
+            type="button"
+            role="tab"
+            aria-controls="panel-calibration"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Calib
           </button>
           <button
             id="tab-export"
@@ -91,7 +102,7 @@
             </select>
             <div id="image-fields" hidden>
               <h2>Image Input</h2>
-              <button class="btn btn-outline" id="image-open" type="button">Image Input</button>
+              <button class="btn btn-outline" id="image-open" type="button">Import</button>
               <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" hidden />
               <label for="image-mode">Processing Method</label>
               <select class="inp" id="image-mode">
@@ -366,6 +377,15 @@
             </div>
             <p id="tube-render-error" role="status"></p>
           </section>
+        </fieldset>
+        </div>
+        <div
+          id="panel-calibration"
+          class="sidebar-panel"
+          role="tabpanel"
+          aria-labelledby="tab-calibration"
+          hidden
+        >
           <section id="geometry-compensation">
             <fieldset class="csv-edit-controls">
             <div class="sidebar-section-heading">
@@ -400,9 +420,17 @@
               value="40"
             />
             <p class="note" id="curve-status"></p>
+            <section class="visual-calibration-launch">
+              <h2>Visual Calibration</h2>
+              <button class="btn btn-outline" id="calibration-open" type="button">Open Photo Calibration</button>
+            </section>
             </fieldset>
+            <div class="standard-leveling-actions">
+              <button class="btn btn-outline" id="calibration-standard-preview" type="button" aria-pressed="false">Preview 100-Step Pattern</button>
+              <button class="btn btn-outline" id="calibration-standard" type="button">Export 100-Step Pattern</button>
+            </div>
+            <p id="calibration-standard-status" role="status"></p>
           </section>
-        </fieldset>
         </div>
         <div
           id="panel-export"
@@ -665,8 +693,11 @@
             <strong id="total">—</strong>
           </div>
           <div>
-            <span>Liquid Total Length</span>
-            <strong id="liquid-total">—</strong>
+            <span>Current Output</span>
+            <strong id="current-output">
+              <span id="current-output-value">—</span>
+              <span id="current-output-unit">steps</span>
+            </strong>
           </div>
           <div>
             <span>Liquid-Gas Segment Count</span>
@@ -675,5 +706,78 @@
         </div>
       </article>
     </main>
+    <dialog id="calibration-dialog" aria-labelledby="calibration-title">
+      <div class="calibration-dialog-heading">
+        <h2 id="calibration-title">Visual Calibration</h2>
+        <button class="btn-icon" id="calibration-close" type="button" aria-label="Close" title="Close">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>
+      <fieldset class="csv-edit-controls calibration-dialog-content">
+        <div class="calibration-photo-area">
+          <canvas id="calibration-photo" width="600" height="600" aria-label="Photo endpoints. In manual mode click to add a point; Alt-click to remove a point." hidden></canvas>
+        </div>
+        <div class="calibration-photo-controls">
+          <button class="btn btn-outline" id="calibration-file-open" type="button">Import Photo</button>
+          <input id="calibration-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
+          <label for="calibration-mode">Endpoints</label>
+          <select class="inp" id="calibration-mode">
+            <option value="auto">Automatic</option>
+            <option value="manual">Mark Points</option>
+          </select>
+          <div class="calibration-thresholds">
+                <div>
+                  <label for="calibration-h-low">Hue Min</label>
+                  <div class="slider-number-row">
+                    <input class="slider" id="calibration-h-low-slider" type="range" min="0" max="179" value="26" step="1" aria-label="Hue Min" />
+                    <input class="inp" id="calibration-h-low" type="number" min="0" max="179" value="26" step="1" />
+                  </div>
+                </div>
+                <div>
+                  <label for="calibration-h-high">Hue Max</label>
+                  <div class="slider-number-row">
+                    <input class="slider" id="calibration-h-high-slider" type="range" min="0" max="179" value="32" step="1" aria-label="Hue Max" />
+                    <input class="inp" id="calibration-h-high" type="number" min="0" max="179" value="32" step="1" />
+                  </div>
+                </div>
+                <div>
+                  <label for="calibration-s-low">Saturation Min</label>
+                  <div class="slider-number-row">
+                    <input class="slider" id="calibration-s-low-slider" type="range" min="0" max="255" value="130" step="1" aria-label="Saturation Min" />
+                    <input class="inp" id="calibration-s-low" type="number" min="0" max="255" value="130" step="1" />
+                  </div>
+                </div>
+                <div>
+                  <label for="calibration-v-low">Brightness Min</label>
+                  <div class="slider-number-row">
+                    <input class="slider" id="calibration-v-low-slider" type="range" min="0" max="255" value="230" step="1" aria-label="Brightness Min" />
+                    <input class="inp" id="calibration-v-low" type="number" min="0" max="255" value="230" step="1" />
+                  </div>
+                </div>
+                <div>
+                  <label for="calibration-min-area">Min Area (px)</label>
+                  <div class="slider-number-row">
+                    <input class="slider" id="calibration-min-area-slider" type="range" min="0" max="3000" value="150" step="1" aria-label="Min Area (px)" />
+                    <input class="inp" id="calibration-min-area" type="number" min="0" max="3000" value="150" step="1" />
+                  </div>
+                </div>
+                <div>
+                  <label for="calibration-close-k">Join Fragments</label>
+                  <div class="slider-number-row">
+                    <input class="slider" id="calibration-close-k-slider" type="range" min="0" max="30" value="0" step="1" aria-label="Join Fragments" />
+                    <input class="inp" id="calibration-close-k" type="number" min="0" max="30" value="0" step="1" />
+                  </div>
+                </div>
+          </div>
+          <div class="calibration-actions">
+            <button class="btn btn-outline" id="calibration-points-clear" type="button">Clear Points</button>
+            <button class="btn btn-outline" id="calibration-download" type="button" disabled>Export Measurements</button>
+          </div>
+          <output id="calibration-result" aria-live="polite"></output>
+          <p id="calibration-error" role="alert"></p>
+          <button class="btn btn-primary" id="calibration-apply" type="button" disabled>Apply Compensation</button>
+        </div>
+      </fieldset>
+    </dialog>
   </body>
 </html>

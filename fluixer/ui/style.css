@@ -27,14 +27,14 @@ header {
 }
 main {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   max-width: auto;
   margin: 0;
   min-height: calc(100vh - 80px);
 }
 aside {
   padding: 24px;
-  background: var(--glass);
+  /* background: var(--glass); */
   border-right: 1px solid var(--line);
   min-width: 0;
 }
@@ -274,12 +274,13 @@ canvas:active {
   width: 100%;
   height: 220px;
   aspect-ratio: 1;
-  background: var(--surface);
+  /* background: var(--surface); */
   border: 1px solid var(--line-2);
   border-radius: 0;
   cursor: default;
   margin: 12px 0;
 }
+
 #brush-fields,
 #step-fields,
 #image-fields {
@@ -620,7 +621,7 @@ canvas:active {
   aspect-ratio: 1;
   display: block;
   border: 1px solid var(--line-2);
-  background: var(--bg, #fff);
+  background: var(--surface);
 }
 #image-status:empty {
   display: none;
@@ -646,12 +647,12 @@ optgroup {
   font-weight: 400;
   font-style: normal;
 }
-/* input[type="number"] {
-  font-variant-numeric: tabular-nums;
-} */
+
 input[type="number"]::-webkit-inner-spin-button {
-  margin-right: -8px; 
+  margin-right: -6px; 
   font-variant-numeric: tabular-nums;
+  background: transparent;
+  mix-blend-mode: multiply;
 }
 /* The sidebar exposes one compact task panel at a time. */
 aside {
@@ -682,8 +683,12 @@ aside {
   background: var(--display);
   color: var(--bg);
 }
-.sidebar-tabs button:hover {
+.sidebar-tabs button:hover:not(:disabled) {
   opacity: 0.7;
+}
+.sidebar-tabs button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 .sidebar-tabs [hidden],
 .sidebar-panel[hidden] {
@@ -759,23 +764,51 @@ aside {
   }
 }
 
-/* === Inline geometry compensation === */
-#panel-tube #geometry-compensation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 5px 12px;
-  margin-top: 16px;
+/* === Calibration panel === */
+.sidebar-panel .visual-calibration-launch {
+  margin-top: 20px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-#panel-tube #geometry-compensation[hidden] {
-  display: none;
+#calibration-dialog {
+  box-sizing: border-box;
+  width: min(1080px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: var(--primary);
 }
-#geometry-compensation h2 {
+#calibration-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.calibration-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.calibration-dialog-heading h2 { margin: 0; }
+.calibration-dialog-content { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 24px; }
+.calibration-photo-area { min-width: 0; min-height: 220px; display: grid; place-items: center; background: var(--surface); }
+#calibration-photo { display: block; width: auto; height: auto; max-width: 100%; max-height: min(680px, calc(100dvh - 160px)); cursor: crosshair; }
+#calibration-photo[hidden] { display: none; }
+.calibration-photo-controls { min-width: 0; }
+.calibration-photo-controls label { margin: 10px 0 6px; }
+.calibration-thresholds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.calibration-thresholds .slider-number-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: center; gap: 4px; }
+.calibration-thresholds .inp { width: 100%; min-width: 0; padding: 6px 3px; border-radius: var(--r-md); }
+.calibration-thresholds .slider { margin: 12px 0; }
+.calibration-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+#calibration-result { display: block; font: 11px var(--f-mono); line-height: 1.6; }
+#calibration-error { color: var(--error); font: 12px var(--f-mono); line-height: 1.5; }
+#calibration-error:empty { display: none; }
+#calibration-apply { margin-top: 12px; width: 100%; }
+@media (max-width: 700px) {
+  .calibration-dialog-content { grid-template-columns: minmax(0, 1fr); }
+  #calibration-photo { max-height: 40dvh; }
+}
+/* #geometry-compensation h2 {
   grid-column: 1/-1;
   font-size: 14px;
-}
-#panel-tube #curve-preview {
+} */
+#panel-calibration #curve-preview {
   grid-column: 1;
   grid-row: auto;
   width: 100%;
@@ -785,7 +818,6 @@ aside {
 }
 #geometry-compensation label,
 #geometry-compensation input,
-#geometry-compensation button,
 #geometry-compensation p {
   grid-column: 1;
   margin: 8px 0 0 0;
@@ -805,10 +837,6 @@ aside {
     min-height: 28px;
     padding: 3px 8px;
   }
-  #panel-tube #geometry-compensation {
-    margin-top: 8px;
-    padding-top: 8px;
-  }
 }
 
 /* Sidebar reset actions beside their section titles. */
@@ -818,7 +846,7 @@ aside {
   justify-content: space-between;
   gap: 8px;
   grid-column: 1 / -1;
-  margin: 12px 0 10px;
+  margin: 12px 0 12px;
 }
 .sidebar-panel .sidebar-section-heading h2 {
   min-width: 0;
@@ -831,7 +859,7 @@ aside {
   min-height: 16px;
   padding: 0;
   margin: 0;
-  border-radius: var(--r-sm);
+  /* border-radius: var(--r-sm); */
   border: 0;
 }
 .sidebar-reset .ico {
@@ -895,4 +923,39 @@ aside {
 .csv-edit-controls:disabled,
 .csv-tube-controls:disabled {
   opacity: 0.4;
+}
+
+/* Standard leveling command export shares the Calibration panel. */
+.standard-leveling-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#calibration-standard-status { font: 11px var(--f-mono); line-height: 1.4; }
+#calibration-standard-status:empty { display: none; }
+@media (max-height: 800px) {
+  #panel-calibration #curve-preview {
+    width: min(100%, clamp(100px, calc(100dvh - 510px), 280px));
+    margin-inline: auto;
+  }
+}
+
+/* Keep the unit anchored while the command type and digit count change. */
+#current-output {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 20px;
+  white-space: nowrap;
+}
+.metrics #current-output-value {
+  flex: 0 0 6ch;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.metrics #current-output-unit {
+  flex: 0 0 auto;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }

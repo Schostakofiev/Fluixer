@@ -76,7 +76,7 @@ def create_app(config=None):
 
     @app.get('/<path:asset>')
     def asset(asset):
-        allowed = asset in {'app.js', 'image-input.js', 'tube-renderer.js', 'style.css'}
+        allowed = asset in {'app.js', 'image-input.js', 'visual-calibration.js', 'tube-renderer.js', 'style.css'}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}
         if not allowed:
@@ -85,7 +85,7 @@ def create_app(config=None):
 
     @app.route('/api/<operation>', methods=['GET', 'POST'])
     def api(operation):
-        if operation not in {'display', 'export', 'image', 'step', 'tube-step'}:
+        if operation not in {'display', 'export', 'calibration-standard', 'image', 'step', 'tube-step'}:
             return jsonify(error='Endpoint not found'), 404
         if request.method == 'GET' and operation != 'display':
             return jsonify(error='Use POST for this endpoint'), 405
@@ -108,6 +108,11 @@ def create_app(config=None):
                 data = request.get_json()
             if not isinstance(data, dict):
                 raise ValueError('Request body must be a JSON object')
+            if operation == 'calibration-standard':
+                from .standard_leveling import standard_csv_payload
+                with _lock:
+                    body,name,rows,count=standard_csv_payload(data)
+                return Response(body,content_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="{name}"','X-Row-Count':str(rows),'X-Liquid-Count':str(count)})
             if operation == 'export':
                 with _lock:
                     body, name, rows = csv_payload(data)

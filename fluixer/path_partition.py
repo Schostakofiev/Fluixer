@@ -6,7 +6,7 @@ maximum arc-length step when compensation is active. Every resulting chord is sp
 import math
 from functools import lru_cache
 from .segments import partition_path
-from .compensation import bezier_value
+from .compensation import curve_value
 
 TOLERANCE=.01
 MAX_SAMPLES=200000
@@ -86,15 +86,31 @@ def region_for(pattern,c):
         return PolygonRegion(tuple((rule,tuple(tuple((x+a*w,z+b*h) for a,b in ring) for ring in rings)) for rule,rings in data['groups']))
     raise ValueError('Unsupported pattern type')
 
-def along_path(path,region,*,height,curve,front_y=None,projection=None,back_y=None):
-    amp,cx,cy=curve
-    offsets=[amp*bezier_value(1-i/256,cx,cy) for i in range(257)] if amp and any(cy) else [0]*257
+def compensation_transform(height_range,curve,projection=None):
+    """Sample top-to-bottom tube height, correcting model X before projection.
+
+    The physical tube's projection depth stays unchanged: compensation moves the
+    pattern membership query, not the tube or the projection's clipping planes.
+    """
+    amp,cx,cy=curve[:3]
+    offsets=[amp*curve_value(1-i/256,curve) for i in range(257)] if amp and any(cy) else [0]*257
+    bottom,top=height_range
+    span=top-bottom
     def transform(p):
+        u=max(0,min(256,(p[2]-bottom)/span*256)) if span>1e-12 else 128
+        k=min(255,int(u));off=offsets[k]+(offsets[k+1]-offsets[k])*(u-k)
+        corrected=(p[0]-off,p[1],p[2])
         if projection:
-            x,z,depth=projection(p)
-            p=(x,depth,z)
-        u=max(0,min(256,p[2]/height*256));k=min(255,int(u));off=offsets[k]+(offsets[k+1]-offsets[k])*(u-k)
-        return (p[0]-off,p[2],p[1])
+            x,z,depth=projection(corrected)
+            if off:depth=projection(p)[2]
+            return (x,z,depth)
+        return (corrected[0],corrected[2],corrected[1])
+    return transform
+
+
+def along_path(path,region,*,height_range,curve,front_y=None,projection=None,back_y=None):
+    amp,cx,cy=curve[:3]
+    transform=compensation_transform(height_range,curve,projection)
     windows=[];samples=0
     def segment(sa,sb,a,b,depth=0):
         nonlocal samples
