@@ -76,8 +76,9 @@ def create_app(config=None):
 
     @app.get('/<path:asset>')
     def asset(asset):
-        allowed = asset in {'app.js', 'image-input.js', 'visual-calibration.js', 'tube-renderer.js', 'style.css'}
+        allowed = asset in {'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'tube-renderer.js', 'style.css'}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
+        allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('svg/*.svg')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}
         if not allowed:
             return jsonify(error='Page not found'), 404

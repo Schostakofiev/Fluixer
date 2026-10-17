@@ -156,11 +156,10 @@ select.inp {
 }
 /* === Preview viewport, legend and metrics === */
 .view-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 3;
 }
 .view-buttons {
   display: flex;
@@ -378,7 +377,7 @@ canvas:active {
 .view-tools {
   position: absolute;
   right: 16px;
-  top: 80px;
+  top: 50%; transform: translateY(-50%);
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -387,40 +386,23 @@ canvas:active {
   background: var(--glass);
   border-radius: var(--r-md);
 }
-.view-tools .btn-icon,
-.view-bottom-tools .btn-icon {
+.view-tools .btn-icon {
   border-radius: var(--r-sm);
   background: var(--surface);
 }
-.view-tools .btn-icon[aria-pressed="true"],
-.view-bottom-tools .btn-icon[aria-pressed="true"] {
+.view-tools .btn-icon[aria-pressed="true"] {
   background: var(--display);
   color: var(--bg);
   border-color: var(--display);
 }
-.view-tools .btn-icon:hover,
-.view-bottom-tools .btn-icon:hover {
+.view-tools .btn-icon:hover {
   opacity: 0.8;
 }
-.view-tools .btn-icon:disabled,
-.view-bottom-tools .btn-icon:disabled {
+.view-tools .btn-icon:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.view-bottom-tools {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  padding: 8px;
-  background: var(--glass);
-  border-radius: var(--r-md);
-}
 .viewport .legend {
   left: 24px;
   bottom: 24px;
@@ -501,7 +483,6 @@ canvas:active {
     width: 100%;
     height: 100%;
   }
-  article > .view-header,
   article > .playback,
   article > .metrics {
     flex-shrink: 0;
@@ -513,9 +494,6 @@ canvas:active {
   }
 }
 @media (min-width: 621px) and (max-height: 720px) {
-  article > .view-header {
-    margin-bottom: 12px;
-  }
   .playback {
     padding: 12px 0;
   }
@@ -555,7 +533,6 @@ canvas:active {
   z-index: 1;
 }
 .view-tools,
-.view-bottom-tools,
 .view-status,
 .viewport .legend {
   z-index: 2;
@@ -822,23 +799,29 @@ aside {
   min-width: 0;
   margin: 0;
 }
-.sidebar-section-heading .sidebar-reset {
+/* Shared Reset states; compact variants keep the section-heading dimensions. */
+.reset-button:hover:not(:disabled) {
+  opacity: 0.8;
+}
+.reset-button:active:not(:disabled) {
+  opacity: 0.6;
+}
+.reset-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sidebar-section-heading .reset-button--compact {
   flex: 0 0 16px;
   width: 16px;
   height: 16px;
   min-height: 16px;
   padding: 0;
   margin: 0;
-  /* border-radius: var(--r-sm); */
   border: 0;
 }
-.sidebar-reset .ico {
+.reset-button--compact .ico {
   width: 16px;
   height: 16px;
-}
-.sidebar-reset:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 @media (max-height: 700px) {
   .sidebar-section-heading {
@@ -940,3 +923,14 @@ aside {
 
 .calibration-parameters-heading { margin-top: 16px; }
 .calibration-parameters-heading h2 { margin: 0; font: inherit; }
+
+/* Preview compensation is independent of render style and export choice. */
+#view-compensated { flex: none; border-radius: var(--r-sm); }
+#view-compensated[aria-pressed="true"] { background: var(--display); color: var(--bg); }
+#view-compensated:disabled { opacity: 0.4; cursor: not-allowed; }
+.view-mode-divider { flex: 0 0 1px; width: 1px; height: 16px; background: var(--line); }
+.export-original { width: 100%; justify-content: space-between; margin-top: 8px; }
+
+/* External SVG artwork retains its viewBox and follows the selected button state. */
+.button-svg { object-fit: contain; flex: none; pointer-events: none; }
+button[aria-pressed="true"] > .button-svg { filter: invert(1); }

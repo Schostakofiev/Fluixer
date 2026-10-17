@@ -87,20 +87,34 @@ def standard_rows(data):
     centers=row_centers(cylinder_settings(data.get('cylinder')),curve_settings(data.get('compensation')))
     divisor=distance/100
     if divisor==0:raise ValueError('Gas spacing conversion underflow')
-    machine=MachineParameters(speed,gas_k,625)
     # The 100 and 50 below are literal liquid command budgets, not lengths
     # converted back into liquid steps. Step length is used only on the gas side.
     gaps=[(b-a)/divisor-STANDARD_STEPS for a,b in zip(centers,centers[1:])]
     tail=(centers[0]+pre_add)/divisor-STANDARD_STEPS/2
     if any(not math.isfinite(v) or v<=0 for v in gaps) or not math.isfinite(tail) or tail<0:
         raise ValueError('The current gas calibration leaves insufficient space for 100-step segments. Increase the tube size or check 100 Steps Length')
+    # Round cumulative gas budgets from the physical inlet, including Pre-Add.
+    # Subtract the exact liquid budgets before applying the gas factor. Rounding
+    # each gas gap separately would accumulate a positional error on every row.
+    gas_factor=int(gas_k)/625
+    if gas_factor<=0:
+        raise ValueError('k_Gas must be at least 1 for standard leveling')
+    cumulative=[((center+pre_add)/divisor-STANDARD_STEPS*(i+0.5))*gas_factor
+                for i,center in enumerate(centers)]
+    if any(not math.isfinite(value) for value in cumulative):
+        raise ValueError('Gas spacing conversion overflow')
+    boundaries=[round(value) for value in cumulative]
+    gas_steps=[boundaries[0]]+[b-a for a,b in zip(boundaries,boundaries[1:])]
+    if gas_steps[0]<0 or any(value<1 for value in gas_steps[1:]):
+        raise ValueError('Gas spacing is below one step. Increase the tube size or check calibration parameters')
+    # Values are already gas motor steps. A neutral factor retains the shared
+    # 2000-step splitting policy without applying k_Gas a second time.
+    machine=MachineParameters(speed,625,625)
     rows=[]
     for i in range(len(centers)-1,-1,-1):
-        # Exact liquid command, independent of k_Liquid and Steps/Segments.
         rows.append(['move','l','fwd',STANDARD_STEPS,int(speed),'steps',''])
-        gas=gaps[i-1] if i else tail
-        if gas>0:rows.extend(build_rows([gas],[0],machine,'steps'))
-        if len(rows)>1_000_000:raise ValueError('Standard export exceeds one million rows')
+        if gas_steps[i]>0:rows.extend(build_rows([gas_steps[i]],[0],machine,'steps'))
+        if len(rows)>1_000_000:raise ValueError('standard export exceeds one million rows')
     return rows,len(centers)
 
 

@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/style.css" />
     <script src="/tube-renderer.js" defer></script>
     <script src="/image-input.js" defer></script>
+    <script src="/history.js" defer></script>
     <script src="/visual-calibration.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
@@ -218,15 +219,13 @@
             <div class="sidebar-section-heading">
               <h2>Tube</h2>
               <button
-                class="btn-icon sidebar-reset"
+                class="btn-icon reset-button--compact reset-button"
                 id="tube-reset"
                 type="button"
                 aria-label="Reset Tube"
                 title="Reset Tube"
               >
-                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" />
-                </svg>
+                <img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
             </div>
             <label for="tube-type">Pipeline Curve</label>
@@ -391,15 +390,13 @@
             <div class="sidebar-section-heading">
               <h2>Geometric Compensation</h2>
               <button
-                class="btn-icon sidebar-reset"
+                class="btn-icon reset-button--compact reset-button"
                 id="curve-reset"
                 type="button"
                 aria-label="Reset Geometric Compensation"
                 title="Reset Geometric Compensation"
               >
-                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" />
-                </svg>
+                <img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
             </div>
             <canvas
@@ -488,7 +485,11 @@
               <option value="segments">Segments</option>
             </select>
             <button id="export" class="btn btn-primary primary" type="submit" disabled>
-              Download CSV
+              Export Compensated CSV
+              <span>↓</span>
+            </button>
+            <button id="export-original" class="btn btn-outline export-original" type="submit" disabled>
+              Export Original CSV
               <span>↓</span>
             </button>
             <p id="export-status" class="note" role="status"></p>
@@ -507,9 +508,13 @@
         </div>
       </aside>
       <article>
+        <div class="viewport">
         <div class="view-header">
-          <div><div class="eyebrow">SPATIAL PREVIEW</div></div>
           <div class="view-buttons">
+            <button id="view-compensated" class="btn-icon" type="button" aria-label="Compensated Preview" title="Compensated Preview" aria-pressed="false">
+              <img class="ico button-svg" src="/svg/view-compensated.svg" alt="" aria-hidden="true" draggable="false" />
+            </button>
+            <span class="view-mode-divider" aria-hidden="true"></span>
             <div class="render-modes" role="group" aria-label="Display Modes">
               <button
                 id="view-lines"
@@ -519,9 +524,7 @@
                 title="Wireframe"
                 aria-pressed="true"
               >
-                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M3 18 8 5l8 14 5-13" />
-                </svg>
+                <img class="ico button-svg" src="/svg/view-lines.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
               <button
                 id="view-render"
@@ -531,16 +534,12 @@
                 title="Render"
                 aria-pressed="false"
               >
-                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <ellipse cx="12" cy="5" rx="7" ry="3" />
-                  <path d="M5 5v14a7 3 0 0 0 14 0V5M5 19a7 3 0 0 1 14 0" />
-                </svg>
+                <img class="ico button-svg" src="/svg/view-render.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
             </div>
-            <button class="btn btn-outline" id="reset" type="button">Reset View</button>
+            <button class="btn btn-outline reset-button" id="reset" type="button"><img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />Reset View</button>
           </div>
         </div>
-        <div class="viewport">
           <div class="view-tools" role="toolbar" aria-label="Pattern Tools">
             <button
               class="btn-icon"
@@ -550,28 +549,8 @@
               title="Show Pattern Plane"
               aria-pressed="false"
             >
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="m3 8 13-4 5 12-13 4z" />
-              </svg>
+              <img class="ico button-svg" src="/svg/plane-toggle.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
-            <button
-              class="btn-icon"
-              id="plane-reset"
-              type="button"
-              aria-label="Reset Projection"
-              title="Reset Projection"
-              aria-pressed="false"
-            >
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" />
-              </svg>
-            </button>
-          </div>
-          <select id="plane-tool" hidden aria-hidden="true">
-            <option value="gumball">Coordinate Axis</option>
-            <option value="direction">Projection Direction</option>
-          </select>
-          <div class="view-bottom-tools" role="toolbar" aria-label="Transformation Tools">
             <button
               class="btn-icon"
               id="tool-gumball"
@@ -580,24 +559,33 @@
               title="Coordinate Axis"
               aria-pressed="false"
             >
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M7 17V3m0 0L4 6m3-3 3 3M7 17h14m0 0-3-3m3 3-3 3M7 17l-4 4" />
-                <circle cx="7" cy="17" r="2" />
-              </svg>
+              <img class="ico button-svg" src="/svg/tool-gumball.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
             <button
               class="btn-icon"
               id="tool-direction"
               type="button"
-              aria-label="Projection Direction"
-              title="Projection Direction"
+              aria-label="Projection Depth"
+              title="Projection Depth"
               aria-pressed="false"
             >
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 20 20 4m0 0h-7m7 0v7M8 13l3 3 3-3-3-3z" />
-              </svg>
+              <img class="ico button-svg" src="/svg/tool-direction.svg" alt="" aria-hidden="true" draggable="false" />
+            </button>
+            <button
+              class="btn-icon reset-button"
+              id="plane-reset"
+              type="button"
+              aria-label="Reset Projection"
+              title="Reset Projection"
+              aria-pressed="false"
+            >
+              <img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
           </div>
+          <select id="plane-tool" hidden aria-hidden="true">
+            <option value="gumball">Coordinate Axis</option>
+            <option value="direction">Projection Direction</option>
+          </select>
           <canvas id="tube-webgl" aria-hidden="true"></canvas>
           <canvas
             id="preview"
@@ -726,8 +714,8 @@
           </select>
           <div class="sidebar-section-heading calibration-parameters-heading">
             <h2>Parameters</h2>
-            <button class="btn-icon sidebar-reset" id="calibration-parameters-reset" type="button" aria-label="Reset Parameters" title="Reset Parameters">
-              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /></svg>
+            <button class="btn-icon reset-button--compact reset-button" id="calibration-parameters-reset" type="button" aria-label="Reset Parameters" title="Reset Parameters">
+              <img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
           </div>
           <div class="calibration-thresholds">
