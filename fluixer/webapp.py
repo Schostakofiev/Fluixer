@@ -130,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.local_request():return
         url=urlsplit(self.path)
-        assets={'/history.js':('history.js','text/javascript'),'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/tube-renderer.js':('tube-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
+        assets={'/serial-controller.js':('serial-controller.js','text/javascript'),'/history.js':('history.js','text/javascript'),'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/tube-renderer.js':('tube-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
         for asset in (Path(__file__).parent/'ui').glob('svg/*.svg'):
             assets['/svg/'+asset.name]=('svg/'+asset.name,'image/svg+xml')
         for asset in (Path(__file__).parent/'ui').glob('css/*.css'):

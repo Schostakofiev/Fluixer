@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {History,shortcut}=require('../fluixer/ui/history.js');
 const nodes={},docEvents={};
-function node(id){return nodes[id]??={value:'50',hidden:false,disabled:false,handlers:{},addEventListener(n,f){(this.handlers[n]??=[]).push(f)},getContext(){return {putImageData(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},setLineDash(){},arc(){},fill(){}}},getBoundingClientRect(){return {left:0,top:0,width:100,height:100}},showModal(){},close(){}};}
+function node(id){return nodes[id]??={style:{},classList:{toggle(){}},setAttribute(){},value:'50',hidden:false,disabled:false,handlers:{},addEventListener(n,f){(this.handlers[n]??=[]).push(f)},getContext(){return {putImageData(){},beginPath(){},moveTo(){},lineTo(){},stroke(){},setLineDash(){},arc(){},fill(){}}},getBoundingClientRect(){return {left:0,top:0,width:100,height:100}},showModal(){},close(){}};}
 const c={window:{addEventListener(){}},document:{getElementById:node,addEventListener:(n,f)=>docEvents[n]=f},FluixerHistory:{History,shortcut},structuredClone,clearTimeout(){},setTimeout:()=>1,queueMicrotask:f=>f()};
 vm.createContext(c);
 let src=fs.readFileSync(require('node:path').join(__dirname,'../fluixer/ui/visual-calibration.js'),'utf8');

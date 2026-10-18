@@ -1969,13 +1969,7 @@ function downloadBlob(blob, filename) {
   }
 }
 
-$('export-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!display || importedCsv || exporting || previewLoading) return;
-  const compensated = event.submitter?.id !== 'export-original';
-  exporting = true;
-  setExportDisabled(true);
-  try {
+async function requestOutputCsv(compensated) {
     const data = {
       cylinder: display.cylinder || DEFAULT_TUBE,
       compensation: compensated ? selectedCurve() : uncompensatedPreviewCurve(),
@@ -1987,7 +1981,6 @@ $('export-form').addEventListener('submit', async (event) => {
       k_liquid: Number($('k-liquid').value),
       unit: $('unit').value,
     };
-    $('export-status').textContent = 'Generating CSV…';
     const response = await fetch('/api/export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1997,6 +1990,18 @@ $('export-form').addEventListener('submit', async (event) => {
       const error = await response.json();
       throw Error(error.error || 'Export failed');
     }
+    return { response, data };
+}
+
+$('export-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!display || importedCsv || exporting || previewLoading) return;
+  const compensated = event.submitter?.id !== 'export-original';
+  exporting = true;
+  setExportDisabled(true);
+  try {
+    $('export-status').textContent = 'Generating CSV…';
+    const { response, data } = await requestOutputCsv(compensated);
     downloadBlob(await response.blob(), `fluixer_${compensated ? 'compensated' : 'original'}_${data.unit}.csv`);
     $('export-status').textContent =
       `Generated ${response.headers.get('X-Row-Count')} rows. Browser download requested (${data.unit}).`;
@@ -3075,6 +3080,7 @@ function syncCsvControls() {
     setExportDisabled(true);
     $('project-save').disabled = true;
   }
+  window.FluixerSerial?.refresh?.();
 }
 function csvPreviewMetrics() {
   syncCurrentOutput();
@@ -3097,6 +3103,7 @@ function clearCsvPreview() {
   $('calibration-standard-status').textContent = '';
   $('csv-import-status').textContent = '';
   $('csv-import-status').removeAttribute('title');
+  $('csv-import-status').hidden = true;
   resetAnimation();
   csvPreviewMetrics();
   setExportDisabled(!display || exporting || projectBusy || previewLoading || display.pattern_config?.type === 'empty');
@@ -3113,6 +3120,7 @@ $('csv-file').addEventListener('change', async () => {
   const token = ++csvReadId, sourceDisplay = display, sourceRequest = requestId;
   csvReading = true;
   syncCsvControls();
+  $('csv-import-status').hidden = true;
   $('csv-import-status').textContent = 'Reading CSV…';
   try {
     if (file.size > 4194304) throw Error('CSV exceeds the 4 MB limit');
@@ -3121,8 +3129,8 @@ $('csv-file').addEventListener('change', async () => {
     if (token !== csvReadId || sourceDisplay !== display || sourceRequest !== requestId || projectBusy) return;
     const parsed = parsePreviewCsv(source, settings);
     stopAnimation();
-    importedCsv = parsed;
-    selectSidebarTab('export');
+    importedCsv = { ...parsed, serialSource: source };
+    selectSidebarTab('output');
     animationProgress = 0;
     $('csv-import-status').textContent = file.name + (parsed.approximate ? ' · Approximate CSV Preview' : ' · CSV Preview');
     $('csv-import-status').title = `k_Gas: ${parsed.kGas}; k_Liquid: ${parsed.kLiquid}; 100 Steps Length: ${parsed.lengthPer100Steps} mm; Pre-Add excluded from preview: ${parsed.omittedPreAdd} mm. Normalized preview timing.`;
@@ -3131,7 +3139,10 @@ $('csv-file').addEventListener('change', async () => {
     syncPlayback();
     draw();
   } catch (error) {
-    if (token === csvReadId) $('csv-import-status').textContent = 'Import failed: ' + error.message;
+    if (token === csvReadId) {
+      $('csv-import-status').hidden = false;
+      $('csv-import-status').textContent = 'Import failed: ' + error.message;
+    }
   } finally {
     if (token === csvReadId) {
       csvReading = false;
@@ -3335,3 +3346,20 @@ document.addEventListener('keydown', event => {
   if (!event.repeat) moveEditHistory(action === 'redo');
 });
 syncHistoryButtons();
+
+FluixerSerial.init({
+  state: () => ({
+    imported: !!importedCsv && !importedCsv.standard,
+    available: !!display && !projectBusy && !previewLoading && !csvReading && !exporting &&
+      !importedCsv?.standard && (!!importedCsv || display.pattern_config?.type !== 'empty'),
+  }),
+  source: async compensated => {
+    if (importedCsv && !importedCsv.standard) {
+      if (!importedCsv.serialSource) throw Error('Import the CSV again before running');
+      return importedCsv.serialSource;
+    }
+    const { response } = await requestOutputCsv(compensated);
+    return response.text();
+  },
+  changed: () => syncCsvControls(),
+});

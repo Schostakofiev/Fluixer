@@ -608,14 +608,14 @@ aside {
   font: 400 10px var(--f-mono);
   cursor: pointer;
 }
-/* Short divider between CSV and Calib; independent of tab order. */
-.sidebar-tabs #tab-export + #tab-calibration,
-.sidebar-tabs #tab-calibration + #tab-export {
+/* Short divider between Output and Calib; independent of tab order. */
+.sidebar-tabs #tab-output + #tab-calibration,
+.sidebar-tabs #tab-calibration + #tab-output {
   position: relative;
   margin-left: 10px;
 }
-.sidebar-tabs #tab-export + #tab-calibration::before,
-.sidebar-tabs #tab-calibration + #tab-export::before {
+.sidebar-tabs #tab-output + #tab-calibration::before,
+.sidebar-tabs #tab-calibration + #tab-output::before {
   content: "";
   position: absolute;
   left: -6px;
@@ -653,7 +653,8 @@ aside {
 .sidebar-panel h2 {
   margin: 12px 0 12px;
 }
-.sidebar-panel label {
+.sidebar-panel label,
+.calibration-photo-controls label {
   margin: 10px 0 10px;
 }
 .sidebar-panel .pair {
@@ -683,16 +684,12 @@ aside {
 
 @media (min-width: 621px) {
   aside {
-    overflow: hidden;
     padding: 16px;
   }
 }
 @media (max-height: 700px) {
   aside {
     gap: 8px;
-  }
-  .sidebar-panel label {
-    margin: 6px 0 3px;
   }
   .sidebar-panel .slider {
     margin: 12px 0;
@@ -701,10 +698,6 @@ aside {
   .sidebar-panel .inp {
     min-height: 30px;
     padding: 4px 8px;
-  }
-  .sidebar-panel h2 {
-    font-size: 14px;
-    margin-bottom: 6px;
   }
 }
 
@@ -741,7 +734,6 @@ aside {
 #calibration-photo { display: block; width: auto; height: auto; max-width: 100%; max-height: min(680px, calc(100dvh - 160px)); cursor: crosshair; }
 #calibration-photo[hidden] { display: none; }
 .calibration-photo-controls { min-width: 0; }
-.calibration-photo-controls label { margin: 10px 0 6px; }
 .calibration-thresholds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 12px; }
 .calibration-thresholds .slider-number-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: center; gap: 4px; }
 .calibration-thresholds .inp { width: 100%; min-width: 0; padding: 6px 3px; border-radius: var(--r-md); }
@@ -755,17 +747,12 @@ aside {
   .calibration-dialog-content { grid-template-columns: minmax(0, 1fr); }
   #calibration-photo { max-height: 40dvh; }
 }
-/* #geometry-compensation h2 {
-  grid-column: 1/-1;
-  font-size: 14px;
-} */
 #panel-calibration #curve-preview {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
   margin: 0;
 }
-#geometry-compensation label,
 #geometry-compensation input,
 #geometry-compensation p {
   margin: 8px 0 0 0;
@@ -774,9 +761,6 @@ aside {
   display: none;
 }
 @media (max-height: 760px) {
-  #panel-tube label {
-    margin: 4px 0 2px;
-  }
   #panel-tube .slider {
     margin: 8px 0;
   }
@@ -823,11 +807,6 @@ aside {
   width: 16px;
   height: 16px;
 }
-@media (max-height: 700px) {
-  .sidebar-section-heading {
-    margin-bottom: 6px;
-  }
-}
 
 /* Paired sliders and numeric inputs share one row: 2:1. */
 .sidebar-panel .slider-number-row {
@@ -844,14 +823,14 @@ aside {
 }
 
 /* CSV import preview controls. */
-#panel-export .csv-import-tools {
+#panel-output .csv-import-tools {
   margin-top: 16px;
   margin-bottom: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 @media (max-height: 760px) {
-  #panel-export .csv-import-tools {
+  #panel-output .csv-import-tools {
     margin-top: 8px;
     padding-top: 8px;
   }
@@ -921,8 +900,7 @@ aside {
   text-align: left;
 }
 
-.calibration-parameters-heading { margin-top: 16px; }
-.calibration-parameters-heading h2 { margin: 0; font: inherit; }
+.calibration-parameters-heading h2 { margin: 0; }
 
 /* Preview compensation is independent of render style and export choice. */
 #view-compensated { flex: none; border-radius: var(--r-sm); }
@@ -934,3 +912,102 @@ aside {
 /* External SVG artwork retains its viewBox and follows the selected button state. */
 .button-svg { object-fit: contain; flex: none; pointer-events: none; }
 button[aria-pressed="true"] > .button-svg { filter: invert(1); }
+
+/* === Output settings and serial controls === */
+#panel-output #export-form {
+  margin: 0;
+  overflow: visible;
+}
+.serial-output-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.serial-output-actions .btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#panel-output #export,
+#panel-output #export-original,
+#serial-generated .btn {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+.serial-output-actions .ico {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+#serial-controls .csv-import-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+#serial-controls .csv-import-actions .btn {
+  width: 100%;
+  min-width: 0;
+}
+#serial-controls #csv-preview-clear {
+  grid-column: 1 / -1;
+}
+#serial-controls [hidden] {
+  display: none;
+}
+#panel-output #serial-controls {
+  margin-bottom: 0;
+}
+.serial-playback {
+  margin: 12px 0;
+}
+/* Fixed tick spacing keeps completed and remaining marks aligned. */
+#serial-progress {
+  display: block;
+  width: 100%;
+  height: 12px;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  background: var(--line-2);
+  color: var(--display);
+  -webkit-mask-image: repeating-linear-gradient(to right, #000 0 2px, transparent 2px 6px);
+  mask-image: repeating-linear-gradient(to right, #000 0 2px, transparent 2px 6px);
+}
+#serial-progress::-webkit-progress-bar {
+  background: var(--line-2);
+}
+#serial-progress::-webkit-progress-value {
+  background: var(--display);
+}
+#serial-progress::-moz-progress-bar {
+  background: var(--display);
+}
+#serial-status {
+  margin: 8px 0 0;
+}
+/* Compact controls do not override the shared label spacing. */
+@media (max-height: 800px) {
+  #panel-output .inp,
+  #panel-output .btn,
+  #panel-output #export,
+  #panel-output #export-original,
+  #serial-generated .btn {
+    min-height: 30px;
+    padding: 4px 10px;
+  }
+  #panel-output #export {
+    margin-top: 10px;
+  }
+  #panel-output #serial-controls {
+    margin-top: 8px;
+    padding-top: 6px;
+  }
+  #panel-output .serial-output-actions {
+    margin-top: 6px;
+    gap: 6px;
+  }
+  #panel-output .serial-playback {
+    margin: 6px 0;
+  }
+}

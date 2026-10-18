@@ -10,6 +10,7 @@
     <script src="/image-input.js" defer></script>
     <script src="/history.js" defer></script>
     <script src="/visual-calibration.js" defer></script>
+    <script src="/serial-controller.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -50,14 +51,14 @@
             Tube
           </button>
           <button
-            id="tab-export"
+            id="tab-output"
             type="button"
             role="tab"
-            aria-controls="panel-export"
+            aria-controls="panel-output"
             aria-selected="false"
             tabindex="-1"
           >
-            CSV
+            Output
           </button>
          <button
             id="tab-calibration"
@@ -153,7 +154,6 @@
                   Eraser
                 </button>
               </div>
-              <h2></h2>
               <div class="pair">
                 <button class="btn btn-outline" id="spatial-undo" type="button">Undo</button>
                 <button class="btn btn-outline" id="spatial-clear" type="button">Clear</button>
@@ -235,7 +235,6 @@
               <option value="hilbert">Hilbert</option>
               <option value="custom-step">Custom</option>
             </select>
-            <h2></h2>
             <div id="tube-step-fields" hidden>
               <button class="btn btn-outline" id="tube-step-open" type="button">Import</button>
               <input id="tube-step-file" type="file" accept=".stp,.step" hidden />
@@ -429,38 +428,23 @@
           </section>
         </div>
         <div
-          id="panel-export"
+          id="panel-output"
           class="sidebar-panel"
           role="tabpanel"
-          aria-labelledby="tab-export"
+          aria-labelledby="tab-output"
           hidden
         >
           <form id="export-form">
           <fieldset class="csv-edit-controls">
-            <h2>CSV Export</h2>
+            <h2>CSV Settings</h2>
             <label for="pre-add">Pre-Add (mm)</label>
-            <input
-              class="inp"
-              id="pre-add"
-              type="number"
-              min="0"
-              max="10000"
-              step="0.1"
-              value="730"
-              required
-            />
+            <input class="inp" id="pre-add" type="number" min="0" max="10000" step="0.1" value="730" required />
             <label for="length-per-100-steps">100 Steps Length (mm)</label>
-            <input
-              class="inp"
-              id="length-per-100-steps"
-              type="number"
-              min="0"
-              step="any"
-              value="9.65"
-              required
-            />
+            <input class="inp" id="length-per-100-steps" type="number" min="0" step="any" value="9.65" required />
             <label for="speed">Speed</label>
             <input class="inp" id="speed" type="number" min="0" step="1" value="400" required />
+            <label for="unit">Output Unit</label>
+            <select class="inp" id="unit"><option value="steps">Steps</option><option value="segments">Segments</option></select>
             <div class="pair">
               <div>
                 <label for="k-gas">k_Gas</label>
@@ -468,22 +452,9 @@
               </div>
               <div>
                 <label for="k-liquid">k_Liquid</label>
-                <input
-                  class="inp"
-                  id="k-liquid"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value="625"
-                  required
-                />
+                <input class="inp" id="k-liquid" type="number" min="0" step="1" value="625" required />
               </div>
             </div>
-            <label for="unit">Output Unit</label>
-            <select class="inp" id="unit">
-              <option value="steps">Steps</option>
-              <option value="segments">Segments</option>
-            </select>
             <button id="export" class="btn btn-primary primary" type="submit" disabled>
               Export Compensated CSV
               <span>↓</span>
@@ -495,14 +466,30 @@
             <p id="export-status" class="note" role="status"></p>
           </fieldset>
         </form>
-          <section class="csv-import-tools">
-            <h2>CSV Import</h2>
+          <section class="csv-import-tools" id="serial-controls">
+            <h2>Serial Output</h2>
             <div class="csv-import-actions">
+              <button class="btn btn-outline" id="serial-connect" type="button">Connect</button>
               <button class="btn btn-outline" id="csv-import" type="button" aria-pressed="false" disabled>Import CSV</button>
               <button class="btn btn-outline" id="csv-preview-clear" type="button" hidden>Exit CSV Preview</button>
             </div>
             <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
-            <p class="note" id="csv-import-status" role="status"></p>
+            <p class="note" id="csv-import-status" role="status" hidden></p>
+            <div class="serial-output-actions" id="serial-generated">
+              <button class="btn btn-primary" id="serial-compensated" type="button" disabled>Run Compensated<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+              <button class="btn btn-outline" id="serial-original" type="button" disabled>Run Original<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+            </div>
+            <div class="playback-controls serial-playback">
+              <button class="btn-icon" id="serial-start" type="button" title="Run CSV" aria-label="Run CSV" hidden disabled><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+              <button class="btn-icon" id="serial-pause" type="button" title="Pause after current command" aria-label="Pause after current command" disabled>
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path id="serial-pause-symbol" d="M8 5v14M16 5v14"/></svg>
+              </button>
+              <button class="btn-icon" id="serial-stop" type="button" title="Stop after current command" aria-label="Stop" disabled>
+                <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+              </button>
+            </div>
+            <progress id="serial-progress" value="0" max="1" aria-label="Serial execution progress"></progress>
+            <p id="serial-status" role="alert" hidden></p>
           </section>
 
         </div>
@@ -707,6 +694,7 @@
         <div class="calibration-photo-controls">
           <button class="btn btn-outline" id="calibration-file-open" type="button">Import Photo</button>
           <input id="calibration-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
+          <button class="btn btn-outline" id="calibration-pick-color" type="button" aria-pressed="false" disabled>Pick Color</button>
           <label for="calibration-mode">Endpoints</label>
           <select class="inp" id="calibration-mode">
             <option value="auto">Automatic</option>

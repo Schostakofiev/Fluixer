@@ -32,7 +32,7 @@
     let mask = new Uint8Array(w * h);
     for (let i = 0; i < mask.length; i++) {
       const [hue, s, v] = hsv(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]);
-      mask[i] = Number(data[i * 4 + 3] >= 128 && hue >= p.hLow && hue <= p.hHigh && s >= p.sLow && v >= p.vLow);
+      mask[i] = Number(data[i * 4 + 3] >= 128 && (p.hCenter == null ? hue >= p.hLow && hue <= p.hHigh : Math.min(Math.abs(hue - p.hCenter), 180 - Math.abs(hue - p.hCenter)) <= p.hRadius) && s >= p.sLow && v >= p.vLow);
     }
     mask = morphology(morphology(mask, w, h, 1, false), w, h, 1, true);
     const radius = Math.floor(p.closeK / 2);
@@ -80,9 +80,22 @@
     if (regions.length >= 2) base.minArea = Math.max(9, Math.min(3000, Math.round(median(regions.map(p => p.area)) * .2)));
     return base;
   }
+  // Sample original image pixels, never the endpoint/scale overlays.
+  function pickedSettings(data, w, h, x, y, base = defaults) {
+    x = Math.max(0, Math.min(w - 1, Math.floor(x)));
+    y = Math.max(0, Math.min(h - 1, Math.floor(y)));
+    const i = (y * w + x) * 4;
+    const [hue, saturation, value] = hsv(data[i], data[i + 1], data[i + 2]);
+    if (data[i + 3] < 128 || saturation < 30 || value < 20)
+      throw Error('Select a colored liquid area, away from glare or shadows');
+    return { ...base, hCenter: hue, hRadius: 6,
+      sLow: Math.max(30, Math.round(saturation * .55)),
+      vLow: Math.max(20, Math.round(value * .55)) };
+  }
   function adjustedSettings(base, sensitivity = 50, noise = 50) {
     const delta = (sensitivity - 50) / 50;
     return { ...base,
+      ...(base.hCenter == null ? {} : { hRadius: Math.max(1, base.hRadius + delta * 5) }),
       hLow: Math.max(0, base.hLow - Math.round(delta * 3)),
       hHigh: Math.min(179, base.hHigh + Math.round(delta * 3)),
       sLow: Math.max(0, Math.min(255, Math.round(base.sLow - delta * 60))),
@@ -170,7 +183,7 @@
       curve: { interpolation: 'pchip', amplitude: amplitude || 1, x: pts.map(p => (p.y - pts[0].y) / (pts[pts.length - 1].y - pts[0].y)), y: offsets.map(v => amplitude ? v / amplitude : 0) },
     };
   }
-  const api = { defaults, autoSettings, adjustedSettings, hsv, detect, cylinderScale, measurement, slopes, interpolate };
+  const api = { defaults, pickedSettings, autoSettings, adjustedSettings, hsv, detect, cylinderScale, measurement, slopes, interpolate };
   if (typeof module !== 'undefined') module.exports = api;
   else root.FluixerCalibration = api;
 })(typeof window === 'undefined' ? {} : window);
@@ -179,7 +192,20 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
   const api = window.FluixerCalibration, $ = id => document.getElementById('calibration-' + id);
   const dialog = $('dialog'), canvas = $('photo'), ctx = canvas.getContext('2d');
   const keys = ['sensitivity', 'noise'];
-  let baseSettings = { ...api.defaults };
+  let baseSettings = { ...api.defaults }, picking = false;
+  function setPicking(value) {
+    picking = value;
+    $('pick-color').textContent = value ? 'Cancel Pick' : 'Pick Color';
+    $('pick-color').setAttribute('aria-pressed', String(value));
+    $('pick-color').classList.toggle('btn-primary', value);
+    $('pick-color').classList.toggle('btn-outline', !value);
+    canvas.style.cursor = value ? 'crosshair' : '';
+  }
+  $('pick-color').addEventListener('click', () => {
+    if (locked() || reading || !photo) return;
+    setPicking(!picking);
+  });
+  dialog.addEventListener('close', () => setPicking(false));
   let photo = null, automatic = [], manual = [], scale = null, result = null, timer = null, readId = 0, reading = false;
   function resetParameters() {
     for (const id of keys) {
@@ -243,6 +269,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     const file = $('file').files[0]; $('file').value = '';
     if (!file || locked()) return;
     const token = ++readId; reading = true; clearTimeout(timer); photo = null; automatic = []; manual = []; scale = null; result = null;
+    setPicking(false); $('pick-color').disabled = true;
     canvas.hidden = true; $('apply').disabled = true; $('download').disabled = true;
     $('result').textContent = ''; $('error').textContent = '';
     const url = URL.createObjectURL(file);
@@ -257,7 +284,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
       photo = g.getImageData(0, 0, buffer.width, buffer.height);
       baseSettings = api.autoSettings(photo.data, photo.width, photo.height);
       resetParameters();
-      $('mode').value = 'auto'; canvas.hidden = false; reading = false; refresh();
+      $('mode').value = 'auto'; canvas.hidden = false; reading = false; $('pick-color').disabled = false; refresh();
     } catch (error) { if (token === readId) $('error').textContent = error.message || 'Could not decode photo'; }
     finally { URL.revokeObjectURL(url); if (token === readId) reading = false; }
   });
@@ -273,8 +300,16 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
   $('mode').addEventListener('change', refresh);
   $('points-clear').addEventListener('click', () => { if (locked()) return; manual = []; $('mode').value = 'manual'; refresh(); });
   canvas.addEventListener('click', event => {
-    if (locked() || reading || !photo || $('mode').value !== 'manual') return;
+    if (locked() || reading || !photo) return;
     const r = canvas.getBoundingClientRect(), x = (event.clientX - r.left) / r.width * photo.width, y = (event.clientY - r.top) / r.height * photo.height;
+    if (picking) {
+      try {
+        baseSettings = api.pickedSettings(photo.data, photo.width, photo.height, x, y, baseSettings);
+        resetParameters(); $('mode').value = 'auto'; setPicking(false); refresh();
+      } catch (error) { $('error').textContent = error.message; }
+      return;
+    }
+    if ($('mode').value !== 'manual') return;
     if (event.altKey) {
       let best = -1, distance = 14 * photo.width / r.width;
       manual.forEach((p, i) => { const d = Math.hypot(x - p.x, y - p.y); if (d < distance) { distance = d; best = i; } });
@@ -308,6 +343,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
       photo = state.photo; baseSettings = { ...state.baseSettings }; manual = structuredClone(state.manual);
       $('mode').value = state.mode;
       keys.forEach((id, index) => { $(id).value = state.values[index]; $(id + '-slider').value = state.values[index]; syncSlider($(id + '-slider')); });
+      setPicking(false); $('pick-color').disabled = !photo;
       canvas.hidden = !photo; refresh();
     },
   });
