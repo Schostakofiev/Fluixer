@@ -19,11 +19,11 @@ const app=fs.readFileSync(require('node:path').join(__dirname,'../fluixer/ui/app
 const tail=app.slice(app.indexOf('// Model edits have their own snapshots;'));
 const elements={},events={};
 const element=id=>elements[id]??={value:'1',checked:false,style:{},addEventListener(){}};
-const c={structuredClone,FluixerHistory:{History,shortcut},editHistory:null,imageHistoryPending:0,projectBusy:false,csvReading:false,importedCsv:null,stepBusy:false,exporting:false,
- tubeNames:['radius','height','diameter','wind'],$:element,curveState:{amplitude:0,x:[0,1],y:[0,0]},tubeCenter:[0,0,0],placement:{position:[0,0,0]},initialPlacement:{position:[0,0,0]},tubeStepSource:null,tubeStepReverse:false,innerDiameter:2,
+const c={FluixerSerial:{init(){}},structuredClone,FluixerHistory:{History,shortcut},editHistory:null,imageHistoryPending:0,projectBusy:false,csvReading:false,importedCsv:null,stepBusy:false,exporting:false,
+ tubeNames:['radius','height','diameter','wind'],$:element,curveState:{amplitude:0,x:[0,1],y:[0,0]},tubeCenter:[0,0,0],placement:{position:[0,0,0]},initialPlacement:{position:[0,0,0]},interactiveTargetLength:2,interactiveDrag:null,interactivePins:[],interactiveStiffness:.2,interactivePoints:[[0,0,0],[1,0,0],[2,0,0]],tubeStepSource:null,tubeStepReverse:false,innerDiameter:2,
  brushPixels:new Uint8Array(4),brushActive:null,spatialWindows:[],stepActive:null,stepPlacement:null,imageActive:null,imageRaster:{data:new Uint8Array([3])},imagePhoto:null,imagePhotoSource:'source',
  requestId:0,imageReadId:0,imageProcessId:0,stepReadId:0,tubeStepReadId:0,imagePhotoPending:null,tubeKind:'cylinder',selectedPoint:null,stepDraft:null,canvas:{style:{}},
- clonePlane:structuredClone, setCurve(v){c.curveState=v;element('curve-amplitude').value=String(v.amplitude);},tubeLabels(){},paintBrush(){},paintImage(){},syncRenderControls(){},syncPlaneTools(){},syncSliderFill(){},
+ patternType:()=>element('pattern-type').value,syncBrushMode(){},spatialErase:null,clonePlane:structuredClone, setCurve(v){c.curveState=v;element('curve-amplitude').value=String(v.amplitude);},tubeLabels(){},paintBrush(){},paintImage(){},syncRenderControls(){},syncPlaneTools(){},syncSliderFill(){},
  loadDisplay(){c.requestId++;c.commitEditHistory();},queueMicrotask:f=>f(),
  document:{querySelectorAll:()=>[],querySelector:()=>null,addEventListener:(n,f)=>events[n]=f},window:{addEventListener(){}},
  yaw:0.4,planeVisible:false,animationProgress:.3};

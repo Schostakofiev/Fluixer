@@ -11,7 +11,7 @@ function requestViewDraw() {
   });
 }
 let spatialWindows = [],
-  spatialErase = false,
+  spatialErase = null,
   spatialStroke = null;
 function uiColor(name, fallback) {
   return typeof getComputedStyle === 'function'
@@ -32,6 +32,11 @@ let initialPlacement = null,
   placement = null,
   planeHandles = [],
   planeDrag = null;
+let interactivePoints = defaultInteractivePoints(), interactiveDrag = null, interactiveTargetLength = 80;
+let interactivePins = [], interactiveTool = null, interactiveStiffness = .2;
+let selectedInteractivePin = null;
+let calculationDisabled = false;
+let interactivePreviewDirty=false,interactivePreviewTimer=null;
 let display = null,
   yaw = -0.55,
   pitch = 0.25,
@@ -95,7 +100,7 @@ function syncPlayback() {
     'playback-progress',
     'playback-rate',
   ])
-    $(id).disabled = !display || projectBusy || previewLoading || csvReading;
+    $(id).disabled = interactivePreviewDirty || calculationDisabled || !!display?.geometry_only || !display || projectBusy || previewLoading || csvReading;
   syncPlaybackProgress();
 }
 // Per-frame updates never refresh unrelated controls or start requests.
@@ -277,7 +282,7 @@ function syncCurrentOutput() {
   const el = $('current-output-value');
   const unitLabel = $('current-output-unit');
   unitLabel.textContent = $('unit').value === 'segments' ? 'segments' : 'steps';
-  if (!display || previewLoading || projectBusy || csvReading) { el.textContent = '—'; return; }
+  if (interactivePreviewDirty || calculationDisabled || display?.geometry_only || !display || previewLoading || projectBusy || csvReading) { el.textContent = '—'; return; }
   const unit = $('unit').value === 'segments' ? 'segments' : 'steps';
   let timeline;
   if (importedCsv) {
@@ -544,6 +549,23 @@ function draw() {
     ctx.lineTo(x - 5 * Math.cos(angle + 0.45), y - 5 * Math.sin(angle + 0.45));
     ctx.stroke();
   }
+  if (interactiveDrag || (interactivePreviewDirty && $('tube-type').value==='interactive')) {
+    $('tube-webgl').hidden = true;
+    drawInteractiveCurve(rect);drawInteractivePins(rect);
+    return;
+  }
+  if(calculationDisabled || display?.geometry_only) {
+    $('tube-webgl').hidden=true;
+    if(display) {
+      ctx.strokeStyle=uiColor('secondary','#585A5A');ctx.lineWidth=2.2;ctx.globalAlpha=1;
+      ctx.beginPath();
+      for(const segment of display.segments)segment.points.forEach((point,i)=>{
+        const p=projectPoint(point);i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);
+      });
+      ctx.stroke();drawCurveEndpoints(display.segments,projectPoint);drawInteractivePins(rect);
+    }
+    return;
+  }
   $('tube-webgl').hidden = renderMode !== 'render' || !display;
   if (!display) return;
   if (renderMode === 'render' && window.FluixerTubeRenderer) {
@@ -563,7 +585,7 @@ function draw() {
     } catch (error) {
       $('tube-render-error').textContent = error.message;
     }
-    drawPlane(rect);
+    drawPlane(rect);drawCurveEndpoints(display.segments,projectPoint);drawInteractivePins(rect);
     return;
   }
   const strokes = [];
@@ -590,11 +612,43 @@ function draw() {
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
-  drawPlane(rect);
+  drawPlane(rect);drawCurveEndpoints(display.segments,projectPoint);drawInteractivePins(rect);
+}
+// Screen-sized arrows show entry into the first point and exit from the last.
+// Read the complete path, so animation progress never moves these markers.
+function drawCurveEndpoints(segments,projectPoint) {
+  const groups=segments.filter(segment=>segment.points.length);
+  if(!groups.length)return;
+  const first=groups[0].points[0],last=groups.at(-1).points.at(-1);
+  function direction(endpoint,reverse) {
+    const origin=projectPoint(endpoint);
+    for(let g=reverse?groups.length-1:0;reverse?g>=0:g<groups.length;g+=reverse?-1:1) {
+      const points=groups[g].points;
+      for(let i=reverse?points.length-1:0;reverse?i>=0:i<points.length;i+=reverse?-1:1) {
+        const p=projectPoint(points[i]),dx=(p[0]-origin[0])*(reverse?-1:1),dy=(p[1]-origin[1])*(reverse?-1:1);
+        const length=Math.hypot(dx,dy);
+        if(length>.5)return {origin,unit:[dx/length,dy/length]};
+      }
+    }
+    return {origin,unit:[0,-1]};
+  }
+  ctx.save();ctx.globalAlpha=1;ctx.lineCap='round';ctx.lineJoin='round';
+  for(const [endpoint,end] of [[first,false],[last,true]]) {
+    const {origin,unit:[dx,dy]}=direction(endpoint,end);
+    const tail=end?4:-16,tip=end?16:-4;
+    const x=origin[0]+dx*tip,y=origin[1]+dy*tip;
+    ctx.beginPath();ctx.moveTo(origin[0]+dx*tail,origin[1]+dy*tail);ctx.lineTo(x,y);
+    ctx.moveTo(x-dx*4.5-dy*2.8,y-dy*4.5+dx*2.8);ctx.lineTo(x,y);
+    ctx.lineTo(x-dx*4.5+dy*2.8,y-dy*4.5-dx*2.8);
+    ctx.strokeStyle=uiColor('surface','#FFFFFF');ctx.lineWidth=4;ctx.stroke();
+    ctx.strokeStyle=uiColor('primary','#1C1C1C');ctx.lineWidth=1.5;ctx.stroke();
+  }
+  ctx.restore();
 }
 function syncRenderControls() {
-  $('view-lines').ariaPressed = String(renderMode === 'lines');
-  $('view-render').ariaPressed = String(renderMode === 'render');
+  $('view-lines').ariaPressed = String(calculationDisabled || renderMode === 'lines');
+  $('view-render').disabled=calculationDisabled;
+  $('view-render').ariaPressed = String(!calculationDisabled && renderMode === 'render');
   const outer = Number($('tube-diameter').value) || 4;
   if (innerDiameter >= outer) innerDiameter = outer * 0.5;
   for (const id of ['tube-inner', 'tube-inner-slider']) {
@@ -643,6 +697,11 @@ function validateTube(c) {
           'reverse',
           'center',
           'initial_placement',
+          'points',
+          'target_length',
+          'avoid_collisions',
+          'pins',
+          'stiffness',
         ].includes(n),
     )
   )
@@ -657,8 +716,13 @@ function validateTube(c) {
       throw Error('Tube parameter out of range: ' + n);
   if (c.mapping !== undefined && c.mapping !== 'projection')
     throw Error('Invalid mapping method');
-  if (c.type !== undefined && !['cylinder', 's-curve', 'hilbert', 'custom-step'].includes(c.type))
+  if (c.type !== undefined && !['cylinder', 's-curve', 'hilbert', 'custom-step', 'interactive'].includes(c.type))
     throw Error('Invalid tube type');
+  if (c.type === 'interactive') {
+    validateInteractivePoints(c.points);
+    if (c.avoid_collisions !== true || !Number.isFinite(c.target_length) || c.target_length <= 0 || !Array.isArray(c.pins) || new Set(c.pins).size !== c.pins.length || c.pins.some(i=>!Number.isInteger(i)||i<0||i>=c.points.length)) throw Error('Invalid Interactive constraints');
+    if(!Number.isFinite(c.stiffness)||c.stiffness<0||c.stiffness>1)throw Error('Invalid Interactive stiffness');
+  }
   if (c.type === 'hilbert' && c.wind > 6) throw Error('Hilbert order must be between 1 and 6');
   if (
     c.type === 'custom-step' &&
@@ -696,6 +760,9 @@ function selectedTube() {
     c.source = tubeStepSource;
     c.reverse = tubeStepReverse;
   }
+  if (c.type === 'interactive') { c.points = structuredClone(interactivePoints); delete c.center;
+    c.target_length = interactiveTargetLength;
+    c.avoid_collisions = true; c.pins = interactivePins.slice(); c.stiffness = interactiveStiffness; }
   return validateTube(c);
 }
 function planeKey(p) {
@@ -716,6 +783,8 @@ function sameTube(a, b) {
     JSON.stringify(a.center || null) === JSON.stringify(b.center || null) &&
     (a.source || null) === (b.source || null) &&
     !!a.reverse === !!b.reverse &&
+    JSON.stringify(a.points || null) === JSON.stringify(b.points || null) &&
+    a.stiffness === b.stiffness && a.target_length === b.target_length && a.avoid_collisions === b.avoid_collisions && JSON.stringify(a.pins) === JSON.stringify(b.pins) &&
     planeKey(a.placement) === planeKey(b.placement) &&
     (a.mapping || 'projection') === 'projection' &&
     (b.mapping || 'projection') === 'projection' &&
@@ -734,8 +803,11 @@ function tubeLabels() {
     isH = $('tube-type').value === 'hilbert';
   for (const id of ['tube-wind', 'tube-slider-wind']) $(id).max = isH ? 6 : 64;
   const custom = $('tube-type').value === 'custom-step';
+  const interactive = $('tube-type').value === 'interactive';
+  $('interactive-fields').hidden = !interactive;
+  syncInteractiveControls();
   $('tube-step-fields').hidden = !custom;
-  for (const n of ['radius', 'height', 'wind']) $('tube-' + n + '-field').hidden = custom;
+  for (const n of ['radius', 'height', 'wind']) $('tube-' + n + '-field').hidden = custom || interactive;
   $('mapping-type').value = 'projection';
   $('mapping-type').disabled = projectBusy;
   $('tube-radius-label').textContent = isS ? 'Width (mm)' : 'Radius (mm)';
@@ -747,6 +819,12 @@ function tubeLabels() {
   for (const n of tubeNames) syncSliderFill($('tube-slider-' + n));
 }
 function setTube(c) {
+  if (c.type === "interactive") {
+    interactivePoints = structuredClone(c.points || defaultInteractivePoints());
+    interactiveTargetLength = c.target_length ?? FluixerInteractive.length(interactivePoints);
+    interactivePins = c.pins.slice();
+    interactiveStiffness = c.stiffness;
+  }
   tubeCenter = c.center ? c.center.slice() : null;
   if (c.type === 'custom-step') {
     tubeStepSource = c.source;
@@ -773,6 +851,7 @@ $('mapping-type').addEventListener('change', loadDisplay);
 $('tube-type').addEventListener('change', () => {
   spatialStroke = null;
   const next = $('tube-type').value;
+  cancelInteractiveDrag();
   if (next !== tubeKind) {
     ++tubeStepReadId;
     planeDrag = null;
@@ -797,7 +876,7 @@ function tubeAvailability() {
   for (const n of tubeNames)
     for (const prefix of ['tube-', 'tube-slider-'])
       $(prefix + n).disabled =
-        projectBusy || ($('tube-type').value === 'custom-step' && n !== 'diameter');
+        projectBusy || (['custom-step', 'interactive'].includes($('tube-type').value) && n !== 'diameter');
 }
 setTube(DEFAULT_TUBE);
 for (const n of tubeNames) {
@@ -817,9 +896,14 @@ for (const n of tubeNames) {
   // Range input fires for dragging and keyboard edits; change would repeat the final request.
 }
 $('tube-reset').addEventListener('click', () => {
+  cancelInteractiveDrag();
   const csvDiameter = importedCsv ? Number($('tube-diameter').value) : null;
   if (!importedCsv) innerDiameter = 2;
   const type = $('tube-type').value;
+  if (type === 'interactive') {
+    interactivePoints = defaultInteractivePoints(); interactiveTargetLength = 80; interactivePins = []; interactiveStiffness = .2; tubeCenter = null; syncInteractiveControls();
+    loadDisplay(); return;
+  }
   if (type === 'custom-step') {
     tubeStepReverse = false;
     $('tube-step-reverse').ariaPressed = 'false';
@@ -903,27 +987,47 @@ function validatePatternBounds(shape, tube = DEFAULT_TUBE) {
     throw Error('Pattern exceeds its frame bounds. Adjust its size or position');
   return shape;
 }
+function patternType() {
+  const kind=$('pattern-type').value;
+  return kind==='brush'&&$('brush-mode').value==='3d'?'spatial-brush':kind;
+}
+function resetBrushTools() {
+  brushErase = null;
+  spatialErase = null;
+  syncBrushTool();
+  syncSpatialControls();
+}
+function syncBrushMode(openPlane=false) {
+  $('brush-mode-fields').hidden=$('pattern-type').value!=='brush';
+  if(openPlane&&patternType()==='brush') {
+    planeVisible=true;
+    placement=placement||defaultPlacement(selectedTube(),display?.bounds);
+    if(!initialPlacement)initialPlacement=clonePlane(placement);
+    $('plane-tool').value='';
+  }
+  if(patternType()==='spatial-brush')planeHandles=[];
+  syncViewEditTools();syncPlaneTools();
+}
 function selectedPattern() {
-  if ($('pattern-type').value === 'spatial-brush')
+  if (patternType() === 'spatial-brush')
     return { type: 'spatial-brush', windows: spatialWindows.map((w) => w.slice()) };
-  if ($('pattern-type').value === 'image')
+  if (patternType() === 'image')
     return imageActive ? validateImagePattern(imageActive, selectedTube()) : { type: 'empty' };
-  if ($('pattern-type').value === 'brush') {
+  if (patternType() === 'brush') {
     if (!brushActive) {
-      const tube = patternFrame(selectedTube()),
-        side = Math.min(2 * tube.radius, tube.height) * 0.7;
+      const tube = patternFrame(selectedTube());
       brushActive = {
         type: 'brush',
         source: brushSource(),
-        width: side,
-        height: side,
-        x: (2 * tube.radius - side) / 2,
-        z: (tube.height - side) / 2,
+        width: 2*tube.radius,
+        height: tube.height,
+        x: 0,
+        z: 0,
       };
     }
     return validateBrushPattern(brushActive, selectedTube());
   }
-  if ($('pattern-type').value === 'step') {
+  if (patternType() === 'step') {
     if (!stepActive) return { type: 'empty' };
     return validateStepPattern(stepActive, selectedTube());
   }
@@ -945,6 +1049,7 @@ function sameImage(a, b) {
   return !!b && b.type === 'image' && sameBrush({ ...a, type: 'brush' }, { ...b, type: 'brush' });
 }
 function paintImage() {
+  $('image-clear').disabled = projectBusy || !(imageRaster || imageActive || imagePhotoSource);
   const g = $('image-preview').getContext('2d');
   g.clearRect(0, 0, 256, 256);
   g.fillStyle = uiColor('accent-text', '#C2141C');
@@ -1031,7 +1136,7 @@ async function processImage() {
     };
     $('image-status').textContent = '';
     paintImage();
-    if ($('pattern-type').value === 'image') loadDisplay();
+    if (patternType() === 'image') loadDisplay();
   } catch (error) {
     if (read === imageReadId && id === imageProcessId)
       $('image-status').textContent = error.message;
@@ -1098,7 +1203,7 @@ let stepDraft = null,
   stepActive = null,
   stepReadId = 0,
   stepBusy = false;
-const stepControlIds = ['step-open', 'step-apply'];
+const stepControlIds = ['step-open', 'step-apply', 'step-clear'];
 let stepPlacement = { width: 50, height: 50, x: 15, z: 12.5 };
 function validateStepPattern(shape, tube = DEFAULT_TUBE) {
   if (
@@ -1131,8 +1236,12 @@ function previewCurveFor(curve, tube) {
     ? curve : uncompensatedPreviewCurve();
 }
 function fetchDisplay(shape, tube, curve = uncompensatedPreviewCurve()) {
+  if(calculationDisabled)return fetch('/api/display',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({cylinder:tube,geometry_only:true}),
+  });
   if (
-    tube.type === 'custom-step' ||
+    ['custom-step', 'interactive'].includes(tube.type) ||
     ['step', 'brush', 'image', 'empty', 'spatial-brush'].includes(shape.type)
   )
     return fetch('/api/display', {
@@ -1147,7 +1256,7 @@ function fetchDisplay(shape, tube, curve = uncompensatedPreviewCurve()) {
   return fetch(displayURL(curve, tube));
 }
 function clearStepResult() {
-  if ($('pattern-type').value !== 'step') return;
+  if (patternType() !== 'step') return;
   stepActive = null;
   stopAnimation();
   loadDisplay();
@@ -1256,9 +1365,25 @@ $('step-file').addEventListener('change', async () => {
   } finally {
     if (token === stepReadId) {
       stepBusy = false;
-      $('step-open').disabled = projectBusy;
+      syncStepControls();
     }
   }
+});
+function syncStepControls() {
+  $('step-open').disabled = projectBusy || stepBusy;
+  $('step-apply').disabled = projectBusy || stepBusy || !stepDraft;
+  $('step-clear').disabled = projectBusy || stepBusy || !(stepDraft || stepActive);
+}
+$('step-clear').addEventListener('click', () => {
+  if (projectBusy || stepBusy) return;
+  ++stepReadId;
+  stepDraft = null;
+  stepActive = null;
+  $('step-file').value = '';
+  $('step-status').textContent = '';
+  drawStepDraft();
+  syncStepControls();
+  loadDisplay();
 });
 $('step-apply').addEventListener('click', () => {
   if (!stepDraft || stepBusy || projectBusy) return;
@@ -1277,12 +1402,14 @@ const DEFAULT_CURVE = { amplitude: 40, x: [0, 1 / 3, 2 / 3, 1], y: [0, 0, 0, 0] 
 $('brush-size').addEventListener('input', () => syncSliderFill($('brush-size')));
 syncSliderFill($('brush-size'));
 const BRUSH_SIZE = 256,
-  brushControls = ['brush-pen', 'brush-eraser', 'brush-size', 'brush-undo', 'brush-clear'];
+  brushControls = ['brush-pen', 'brush-eraser', 'brush-size', 'brush-clear'];
 let brushPixels = new Uint8Array(BRUSH_SIZE * BRUSH_SIZE),
   brushActive = null,
   brushStroke = null,
-  brushErase = false;
-const brushCanvas = $('brush-canvas');
+  brushErase = null;
+const brushCanvas = document.createElement('canvas');
+brushCanvas.width=brushCanvas.height=256;
+let brushPreviewTimer=null;
 function validateBrushPattern(shape, tube) {
   if (
     !shape ||
@@ -1325,6 +1452,7 @@ function brushSource() {
   });
 }
 function paintBrush() {
+  $('brush-clear').disabled = projectBusy || !brushPixels.some(Boolean);
   const g = brushCanvas.getContext('2d');
   g.clearRect(0, 0, 256, 256);
   g.fillStyle = uiColor('accent-text', '#C2141C');
@@ -1339,20 +1467,19 @@ function paintBrush() {
       }
     }
   }
-  syncHistoryButtons();
+
 }
 function updateBrushPreview() {
-  if (projectBusy || $('pattern-type').value !== 'brush') return;
+  requestViewDraw();
+  if(brushPreviewTimer!==null)return;
+  brushPreviewTimer=setTimeout(()=>{brushPreviewTimer=null;flushBrushPreview();},90);
+}
+function flushBrushPreview() {
+  if (projectBusy || patternType() !== 'brush') return;
   $('brush-status').textContent = '';
   try {
-    const tube = patternFrame(selectedTube()),
-      side = Math.min(2 * tube.radius, tube.height) * 0.7;
-    const placement = brushActive || {
-      width: side,
-      height: side,
-      x: (2 * tube.radius - side) / 2,
-      z: (tube.height - side) / 2,
-    };
+    const tube = patternFrame(selectedTube());
+    const placement = brushActive || {width:2*tube.radius,height:tube.height,x:0,z:0};
     brushActive = validateBrushPattern(
       {
         type: 'brush',
@@ -1375,12 +1502,21 @@ function updateBrushPreview() {
     $('brush-status').textContent = e.message;
   }
 }
-function brushPoint(e) {
-  const r = brushCanvas.getBoundingClientRect();
-  return [
-    Math.max(0, Math.min(256, ((e.clientX - r.left) / r.width) * 256)),
-    Math.max(0, Math.min(256, ((e.clientY - r.top) / r.height) * 256)),
-  ];
+function brushPlaneMapping() {
+  if(!display||!placement||!planeVisible)return null;
+  const frame=patternFrame(display.cylinder),region=brushActive||{x:0,z:0,width:2*frame.radius,height:frame.height};
+  const rect=canvas.getBoundingClientRect(),screen=createProjector(rect.width,rect.height);
+  const o=screen(planePoint(region.x,region.z+region.height)),
+    u=screen(planePoint(region.x+region.width,region.z+region.height)),v=screen(planePoint(region.x,region.z));
+  const ax=(u[0]-o[0])/256,ay=(u[1]-o[1])/256,bx=(v[0]-o[0])/256,by=(v[1]-o[1])/256,det=ax*by-ay*bx;
+  if(Math.abs(det)<.0001)return null;
+  return {rect,o,ax,ay,bx,by,det};
+}
+function brushPoint(e,mapping=brushPlaneMapping()) {
+  if(!mapping)return null;
+  const {rect,o,ax,ay,bx,by,det}=mapping,x=e.clientX-rect.left-o[0],y=e.clientY-rect.top-o[1];
+  const point=[(x*by-y*bx)/det,(ax*y-ay*x)/det];
+  return point.every(v=>v>=0&&v<=256)?point:null;
 }
 function brushLine(a, b, radius, erase) {
   const dx = b[0] - a[0],
@@ -1408,59 +1544,48 @@ function finishBrush(cancel = false, silent = false) {
   const stroke = brushStroke;
   brushStroke = null;
   if (cancel) brushPixels = stroke.before;
-  if (brushCanvas.hasPointerCapture(stroke.id)) brushCanvas.releasePointerCapture(stroke.id);
+  if (canvas.hasPointerCapture(stroke.id)) canvas.releasePointerCapture(stroke.id);
   paintBrush();
-  if (!silent) updateBrushPreview();
+  if (!silent) {clearTimeout(brushPreviewTimer);brushPreviewTimer=null;flushBrushPreview();}
 }
-brushCanvas.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.isPrimary === false || brushStroke || projectBusy || exporting) return;
-  e.preventDefault();
-  const point = brushPoint(e);
-  brushStroke = {
-    id: e.pointerId,
-    before: brushPixels.slice(),
-    point,
-    radius: Math.max(1, Math.min(32, Number($('brush-size').value) / 2 || 8)),
-    erase: brushErase,
-  };
-  brushCanvas.setPointerCapture(e.pointerId);
-  brushLine(point, point, brushStroke.radius, brushStroke.erase);
-  paintBrush();
-  updateBrushPreview();
-});
-brushCanvas.addEventListener('pointermove', (e) => {
-  if (!brushStroke || e.pointerId !== brushStroke.id) return;
-  if (e.buttons === 0) {
+canvas.addEventListener('pointerdown',e=>{
+  if(patternType()!=='brush'||brushErase===null||!planeVisible||calculationDisabled||e.button!==0||e.isPrimary===false||brushStroke||projectBusy||exporting||importedCsv)return;
+  const mapping=brushPlaneMapping(),point=brushPoint(e,mapping);if(!point)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  brushStroke={id:e.pointerId,before:brushPixels.slice(),point,mapping,
+    radius:Math.max(1,Math.min(32,Number($('brush-size').value)/2||8)),erase:brushErase};
+  canvas.setPointerCapture(e.pointerId);
+  brushLine(point,point,brushStroke.radius,brushStroke.erase);paintBrush();updateBrushPreview();
+},true);
+canvas.addEventListener('pointermove',e=>{
+  if(!brushStroke||e.pointerId!==brushStroke.id)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  if(!(e.buttons&1)){finishBrush();return;}
+  const point=brushPoint(e,brushStroke.mapping);
+  if(point){brushLine(brushStroke.point||point,point,brushStroke.radius,brushStroke.erase);paintBrush();updateBrushPreview();}
+  brushStroke.point=point;
+},true);
+canvas.addEventListener('pointerup',e=>{
+  if(brushStroke?.id!==e.pointerId)return;
+  e.preventDefault();e.stopImmediatePropagation();finishBrush();
+},true);
+for(const name of ['pointercancel','lostpointercapture'])canvas.addEventListener(name,e=>{if(brushStroke?.id===e.pointerId)finishBrush(true);},true);
+window.addEventListener('blur',()=>finishBrush(true));
+function syncBrushTool() {
+  $('brush-pen').ariaPressed=String(brushErase===false);
+  $('brush-eraser').ariaPressed=String(brushErase===true);
+  if(patternType()==='brush')canvas.style.cursor=brushErase===null?'':'crosshair';
+}
+for(const [id,erase] of [['brush-pen',false],['brush-eraser',true]]) {
+  $(id).addEventListener('click',()=>{
     finishBrush();
-    return;
-  }
-  const point = brushPoint(e);
-  brushLine(brushStroke.point, point, brushStroke.radius, brushStroke.erase);
-  brushStroke.point = point;
-  paintBrush();
-  updateBrushPreview();
-});
-brushCanvas.addEventListener('pointerup', (e) => {
-  if (brushStroke?.id === e.pointerId) {
-    const point = brushPoint(e);
-    brushLine(brushStroke.point, point, brushStroke.radius, brushStroke.erase);
-    finishBrush();
-  }
-});
-brushCanvas.addEventListener('pointercancel', () => finishBrush(true));
-brushCanvas.addEventListener('lostpointercapture', () => finishBrush(true));
-window.addEventListener('blur', () => finishBrush(true));
-$('brush-pen').addEventListener('click', () => {
-  brushErase = false;
-  $('brush-pen').ariaPressed = 'true';
-  $('brush-eraser').ariaPressed = 'false';
-});
-$('brush-eraser').addEventListener('click', () => {
-  brushErase = true;
-  $('brush-pen').ariaPressed = 'false';
-  $('brush-eraser').ariaPressed = 'true';
-});
-$('brush-undo').addEventListener('click', () => moveEditHistory());
+    cancelInteractiveDrag();interactiveTool=null;syncInteractiveControls();selectSidebarTab('pattern');
+    brushErase=brushErase===erase?null:erase;
+    if(brushErase!==null){planeVisible=true;$('plane-tool').value='';}
+    syncBrushTool();draw();
+  });
+}
+syncBrushTool();
 $('brush-clear').addEventListener('click', () => {
   if (projectBusy) return;
   finishBrush(true);
@@ -1774,7 +1899,7 @@ function followTubeResize() {
     return;
   }
   if (
-    !tubeCenter &&
+    next.type !== 'interactive' && !tubeCenter &&
     display?.bounds &&
     (next.type || 'cylinder') === (display.cylinder.type || 'cylinder') &&
     tubeNames.some((n) => next[n] !== display.cylinder[n])
@@ -1782,6 +1907,8 @@ function followTubeResize() {
     tubeCenter = display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2);
 }
 function loadDisplay() {
+  clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
+  cancelInteractiveDrag(false);
   if (csvReading) return;
   if (!editHistory?.restoring) followTubeResize();
   commitEditHistory();
@@ -1795,7 +1922,7 @@ function loadDisplay() {
     previewLoading = false;
     if (previewQueued) {
       previewQueued = false;
-      loadDisplay();
+      if(!interactiveDrag)loadDisplay();
     } else {
       syncPlayback();
       startCalibPreview();
@@ -1808,10 +1935,10 @@ async function renderDisplay(current) {
   if (importedCsv) stopAnimation(false);
   else resetAnimation(false);
   tubeAvailability();
-  $('spatial-fields').hidden = $('pattern-type').value !== 'spatial-brush';
-  $('image-fields').hidden = $('pattern-type').value !== 'image';
-  $('brush-fields').hidden = $('pattern-type').value !== 'brush';
-  $('step-fields').hidden = $('pattern-type').value !== 'step';
+  $('spatial-fields').hidden = patternType() !== 'spatial-brush';
+  $('image-fields').hidden = patternType() !== 'image';
+  $('brush-fields').hidden = patternType() !== 'brush';
+  $('step-fields').hidden = patternType() !== 'step';
   syncPlayback();
   draw();
   setExportDisabled(true);
@@ -1821,8 +1948,8 @@ async function renderDisplay(current) {
   $('export-status').textContent = '';
   for (const id of ['total', 'current-output-value', 'count']) $(id).textContent = '—';
   try {
-    const requestedPattern = selectedPattern(),
-      requestedCurve = selectedCurve(),
+    const requestedPattern = calculationDisabled ? {type:'empty'} : selectedPattern(),
+      requestedCurve = calculationDisabled ? DEFAULT_CURVE : selectedCurve(),
       requestedTube = selectedTube();
     const previewCurve = previewCurveFor(requestedCurve, requestedTube);
     const response = await fetchDisplay(requestedPattern, requestedTube, previewCurve);
@@ -1835,7 +1962,7 @@ async function renderDisplay(current) {
       throw Error('Brush result mismatch');
     if (requestedPattern.type === 'step' && !sameStep(requestedPattern, data.pattern_config))
       throw Error('STEP result does not match the current pattern');
-    if (!sameCurve(previewCurve, data.compensation))
+    if (!data.geometry_only && !sameCurve(previewCurve, data.compensation))
       throw Error('Compensation parameter response mismatch. Restart the local server');
     if (!sameTube(requestedTube, data.cylinder || DEFAULT_TUBE))
       throw Error('Tube parameter response mismatch. Restart the server');
@@ -1844,7 +1971,7 @@ async function renderDisplay(current) {
       JSON.stringify(requestedPattern) !== JSON.stringify(data.pattern_config)
     )
       throw Error('Spatial brush result mismatch');
-    if (importedCsv?.standard) {
+    if (!calculationDisabled && importedCsv?.standard) {
       const previous = importedCsv;
       const standard = await fetchStandardPattern(requestedCurve, requestedTube);
       if (importedCsv !== previous || current !== requestId) return;
@@ -1852,6 +1979,7 @@ async function renderDisplay(current) {
       $('calibration-standard-status').textContent = `${standard.count} liquid segments · 100 steps each`;
     }
     display = data;
+    interactivePreviewDirty=false;
     csvPreviewMetrics();
     const pending = current !== requestId;
     status('', false, pending);
@@ -1871,10 +1999,12 @@ async function renderDisplay(current) {
   }
 }
 $('pattern-type').addEventListener('change', () => {
+  finishBrush(true,true);resetBrushTools();syncBrushMode(true);
   spatialStroke = null;
-  canvas.style.cursor = $('pattern-type').value === 'spatial-brush' ? 'crosshair' : '';
+  canvas.style.cursor = patternType() === 'spatial-brush' && spatialErase !== null ? 'crosshair' : '';
   loadDisplay();
 });
+$('brush-mode').addEventListener('change',()=>{finishBrush(true,true);spatialStroke=null;resetBrushTools();syncBrushMode(true);loadDisplay();});
 $('reset').addEventListener('click', () => {
   endDrag();
   yaw = -0.55;
@@ -1884,6 +2014,353 @@ $('reset').addEventListener('click', () => {
   panY = 0;
   draw();
 });
+// INTERACTIVE_EDITOR_START
+function defaultInteractivePoints() {
+  return Array.from({ length: 33 }, (_, i) => [i * 2.5, 0, 37.5]);
+}
+function validateInteractivePoints(points) {
+  if (!Array.isArray(points) || points.length < 3 || points.length > 129 ||
+      points.some(p => !Array.isArray(p) || p.length !== 3 || p.some(v => !Number.isFinite(v) || Math.abs(v) > 10000)) ||
+      points.some((p,i) => i && Math.hypot(...p.map((v,k) => v-points[i-1][k])) < .01) ||
+      Math.hypot(...points[0].map((v,k) => v-points.at(-1)[k])) < .01)
+    throw Error('Interactive curve must be open with distinct, finite points');
+  return points;
+}
+function interactiveSamples(points) {
+  const samples = [];
+  for (let i=0; i<points.length-1; i++) {
+    const a=points[i], b=points[i+1], prev=points[Math.max(0,i-1)], after=points[Math.min(points.length-1,i+2)];
+    for (let j=0;j<8;j++) {
+      const t=j/8;
+      samples.push({u:i+t, point:a.map((v,k)=>{
+        const m=i ? (b[k]-prev[k])/2 : b[k]-v;
+        const n=i<points.length-2 ? (after[k]-v)/2 : b[k]-v;
+        return v+t*(m+t*(3*(b[k]-v)-2*m-n+t*(2*(v-b[k])+m+n)));
+      })});
+    }
+  }
+  samples.push({u:points.length-1,point:points.at(-1)});
+  return samples;
+}
+function drawInteractiveCurve(rect) {
+  const projectPoint=createProjector(rect.width,rect.height);
+  const samples=interactiveSamples(interactivePoints);
+  ctx.save();ctx.globalAlpha=1;ctx.strokeStyle=uiColor('primary','#1C1C1C');ctx.lineWidth=3;
+  ctx.beginPath();samples.forEach(({point},i)=>{const p=projectPoint(point);i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);});ctx.stroke();
+  ctx.restore();
+  drawCurveEndpoints([{points:samples.map(sample=>sample.point)}],projectPoint);
+}
+function markInteractiveEditing() {
+  clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
+  interactivePreviewDirty=true;
+  ++requestId;previewQueued=false;
+  setExportDisabled(true);syncPlayback();$('count').textContent='—';
+}
+function scheduleInteractivePreview() {
+  clearTimeout(interactivePreviewTimer);
+  interactivePreviewTimer=setTimeout(()=>{
+    interactivePreviewTimer=null;
+    if(interactiveDrag)return;
+    loadDisplay();
+  },700);
+}
+function acceptInteractiveDrag() {
+  const d=interactiveDrag;if(!d)return;
+  cancelAnimationFrame(d.frame);
+  if(d.collision&&FluixerInteractive.collides(interactivePoints,d.diameter))
+    interactivePoints=d.lastValid||d.original;
+  if(d.solver.spanEdit)interactiveTargetLength=FluixerInteractive.length(interactivePoints);
+  interactiveDrag=null;syncInteractiveControls();commitEditHistory();
+  scheduleInteractivePreview();draw();
+}
+function cancelInteractiveDrag(schedule=true) {
+  if (!interactiveDrag) return;
+  const drag=interactiveDrag; cancelAnimationFrame(drag.frame); interactivePoints=drag.original; interactiveDrag=null;
+  interactiveTargetLength=drag.originalTarget??interactiveTargetLength;
+  interactiveStiffness=drag.originalStiffness??interactiveStiffness;
+  if(drag.id!==null&&canvas.hasPointerCapture(drag.id)) canvas.releasePointerCapture(drag.id);
+  syncInteractiveControls();draw();
+  if(schedule&&interactivePreviewDirty)scheduleInteractivePreview();
+}
+for(const id of ['interactive-radius','interactive-radius-value']) $(id).addEventListener('input',()=>{
+  const value=Number($(id).value);
+  if(!Number.isFinite(value) || value<1 || value>50) return;
+  $('interactive-radius').value=value;$('interactive-radius-value').value=value;
+  syncSliderFill($('interactive-radius'));
+});
+syncSliderFill($('interactive-radius'));
+function syncViewEditTools() {
+  const interactive=$('tube-type').value==='interactive';
+  const spatial=patternType()==='spatial-brush',brush=patternType()==='brush';
+  $('brush-mode-fields').hidden=$('pattern-type').value!=='brush';
+  $('brush-view-tools').hidden=!brush;
+  $('interactive-view-tools').hidden=!interactive;
+  $('spatial-view-tools').hidden=!spatial;
+  $('view-edit-tools').hidden=!interactive&&!spatial&&!brush;
+}
+function syncInteractiveControls() {
+  syncViewEditTools();
+  const active=$('tube-type').value==='interactive';
+  if(!active)interactiveTool=null;
+  if(!active || !interactivePins.includes(selectedInteractivePin))selectedInteractivePin=null;
+  $('interactive-pin').hidden=!active;
+  $('interactive-pin').disabled=projectBusy||csvReading||exporting;
+  $('interactive-pin').ariaPressed=String(interactiveTool==='pin');
+  $('interactive-tension').ariaPressed=String(interactiveTool==='tension');
+  $('interactive-tension').disabled=projectBusy||csvReading||exporting;
+  $('interactive-slack').ariaPressed=String(interactiveTool==='slack');
+  $('interactive-slack').disabled=projectBusy||csvReading||exporting;
+  for(const id of ['interactive-stiffness','interactive-stiffness-value'])$(id).value=Math.round(interactiveStiffness*100);
+  syncSliderFill($('interactive-stiffness'));
+  for(const id of ['interactive-length','interactive-length-value']) {
+    $(id).min=Math.round(Math.min(interactiveTargetLength,FluixerInteractive.minimumLength(interactivePoints,interactivePins))*1000)/1000;
+    $(id).value=Math.round(interactiveTargetLength*1000)/1000;
+  }
+  syncSliderFill($('interactive-length'));
+}
+function drawInteractivePins(rect) {
+  if($('tube-type').value!=='interactive')return;
+  const projectPoint=createProjector(rect.width,rect.height);
+  ctx.save();ctx.globalAlpha=1;ctx.lineWidth=1.7;
+  ctx.strokeStyle=uiColor('accent-text','#C2141C');ctx.fillStyle=uiColor('surface','#FFFFFF');
+  for(const index of interactivePins) {
+    const [x,y]=projectPoint(interactivePoints[index]);
+    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y-12);ctx.stroke();
+    ctx.beginPath();ctx.arc(x,y-15,4,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.beginPath();ctx.arc(x,y,2,0,Math.PI*2);ctx.stroke();
+  }
+  if(interactiveTool==='pin'&&selectedInteractivePin!==null) {
+    for(const axis of interactivePinAxes(projectPoint,rect)) {
+      const [x,y]=axis.end,[ox,oy]=axis.origin;
+      ctx.strokeStyle=axis.color;ctx.fillStyle=axis.color;ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(ox,oy);ctx.lineTo(x,y);ctx.stroke();
+      const angle=Math.atan2(y-oy,x-ox);
+      ctx.beginPath();ctx.moveTo(x,y);
+      ctx.lineTo(x-9*Math.cos(angle-.4),y-9*Math.sin(angle-.4));
+      ctx.lineTo(x-9*Math.cos(angle+.4),y-9*Math.sin(angle+.4));ctx.closePath();ctx.fill();
+      ctx.font='11px sans-serif';ctx.fillText(axis.name,x+6,y-6);
+    }
+  }
+  ctx.restore();
+}
+function interactivePinAxes(projectPoint,rect) {
+  if(selectedInteractivePin===null||!interactivePins.includes(selectedInteractivePin))return [];
+  const point=interactivePoints[selectedInteractivePin],origin=projectPoint(point),size=70/viewScale(rect.width,rect.height);
+  return ['X','Y','Z'].map((name,k)=>{
+    const end=projectPoint(point.map((v,j)=>v+(k===j?size:0)));
+    return {name,k,origin,end,color:['#c54444','#488c58','#397ca8'][k],size};
+  }).filter(a=>Math.hypot(a.end[0]-a.origin[0],a.end[1]-a.origin[1])>15);
+}
+function startInteractivePinMove(e,axis,projectPoint) {
+  markInteractiveEditing();
+  stopAnimation();animationProgress=1;canvas.focus({preventScroll:true});
+  const index=selectedInteractivePin,original=structuredClone(interactivePoints);
+  const options=interactiveSolverOptions(index);
+  options.pins=interactivePins.filter(i=>i!==index);
+  options.pinAxis={index,axis:axis.k};
+  options.grabStep=2*axis.size/Math.hypot(axis.end[0]-axis.origin[0],axis.end[1]-axis.origin[1]);
+  const solver=FluixerInteractive.create(interactivePoints,options);
+  const dx=axis.end[0]-axis.origin[0],dy=axis.end[1]-axis.origin[1];
+  interactiveDrag={id:e.pointerId,kind:'pin-move',x:e.clientX,y:e.clientY,original,
+    originalTarget:interactiveTargetLength,solver,collision:true,diameter:options.diameter,
+    project:projectPoint,mouse:original[index].slice(),axis:{...axis,dx,dy},
+    settled:0,releaseSteps:0,lastValid:original};
+  canvas.setPointerCapture(e.pointerId);draw();
+  interactiveDrag.frame=requestAnimationFrame(advanceInteractive);
+}
+let interactiveLengthEdit=null;
+for(const id of ['interactive-length','interactive-length-value']) {
+  $(id).addEventListener('pointerdown',()=>{
+    cancelInteractiveDrag();interactiveLengthEdit=id==='interactive-length'?structuredClone(interactivePoints):null;
+  });
+  $(id).addEventListener(id==='interactive-length'?'input':'change',()=>{
+    const value=Number($(id).value);if(!Number.isFinite(value)||value<=0){syncInteractiveControls();return;}
+    cancelInteractiveDrag();
+    try {
+      const next=FluixerInteractive.resize(interactiveLengthEdit||interactivePoints,value,interactivePins);
+      validateInteractivePoints(next);
+      if(FluixerInteractive.collides(next,Number($('tube-diameter').value)))throw Error('The end extension meets another part of the tube. Move the end before extending it.');
+      interactivePoints=next;interactiveTargetLength=FluixerInteractive.length(next);
+      syncInteractiveControls();loadDisplay();
+    }catch(error){syncInteractiveControls();status(error.message,true);}
+  });
+  $(id).addEventListener('change',()=>{interactiveLengthEdit=null;syncInteractiveControls();});
+}
+for(const tool of ['pin','tension','slack']) $('interactive-'+tool).addEventListener('click',()=>{
+  cancelInteractiveDrag();selectSidebarTab('tube');interactiveTool=interactiveTool===tool?null:tool;
+  syncInteractiveControls();draw();
+});
+for(const id of ['plane-toggle','tool-gumball','tool-direction','plane-reset']) $(id).addEventListener('click',()=>{
+  if(interactiveTool){interactiveTool=null;syncInteractiveControls();draw();}
+});
+function startInteractiveSolve(solver,kind,originalStiffness=interactiveStiffness) {
+  markInteractiveEditing();
+  const rect=canvas.getBoundingClientRect();
+  stopAnimation();animationProgress=1;
+  interactiveDrag={id:null,kind,originalStiffness,original:structuredClone(interactivePoints),originalTarget:interactiveTargetLength,
+    solver,collision:true,diameter:Number($('tube-diameter').value),released:true,
+    project:createProjector(rect.width,rect.height),settled:0,releaseSteps:0,
+    lastValid:structuredClone(interactivePoints)};
+  interactiveDrag.frame=requestAnimationFrame(advanceInteractive);draw();
+}
+function interactiveSolverOptions(u=0) {
+  return {u,pins:interactivePins.slice(),target:interactiveTargetLength,stiffness:interactiveStiffness,
+    collision:true,diameter:Number($('tube-diameter').value)};
+}
+for(const id of ['interactive-stiffness','interactive-stiffness-value']) {
+  $(id).addEventListener(id==='interactive-stiffness'?'input':'change',()=>{
+    const value=Number($(id).value);
+    if(!Number.isFinite(value)||value<0||value>100){syncInteractiveControls();return;}
+    if(interactiveDrag?.kind!=='relax')cancelInteractiveDrag();
+    const originalStiffness=interactiveStiffness;
+    interactiveStiffness=value/100;syncInteractiveControls();
+    if(interactiveDrag){interactiveDrag.solver.stiffness=interactiveStiffness;interactiveDrag.releaseSteps=0;interactiveDrag.settled=0;}
+    else startInteractiveSolve(FluixerInteractive.create(interactivePoints,interactiveSolverOptions()),'relax',originalStiffness);
+  });
+}
+
+function editInteractivePin(x,y,best,projectPoint,remove=false) {
+  if(!best)for(const end of [0,interactivePoints.length-1]) {
+    const p=projectPoint(interactivePoints[end]);
+    if(Math.hypot(x-p[0],y-p[1])<14)best={u:end};
+  }
+  const existing=interactivePins.findIndex(i=>{
+    const p=projectPoint(interactivePoints[i]);
+    return Math.hypot(x-p[0],y-p[1])<10||Math.hypot(x-p[0],y-p[1]+15)<10;
+  });
+  if(existing>=0) {
+    if(remove){interactivePins.splice(existing,1);selectedInteractivePin=null;}
+    else {selectedInteractivePin=interactivePins[existing];draw();return;}
+  }
+  else if(best) {
+    // Pins attach to material particles. Endpoints have a larger magnetic target.
+    let index=Math.round(best.u),nearest=14;
+    for(const end of [0,interactivePoints.length-1]) {
+      const p=projectPoint(interactivePoints[end]),distance=Math.hypot(x-p[0],y-p[1]);
+      if(distance<nearest){index=end;nearest=distance;}
+    }
+    if(!interactivePins.includes(index))interactivePins.push(index);
+    interactivePins.sort((a,b)=>a-b);selectedInteractivePin=index;
+  }else return;
+  syncInteractiveControls();commitEditHistory();loadDisplay();
+}
+
+canvas.addEventListener('pointerdown',e=>{
+  if(e.button!==0 || !e.isPrimary || $('tube-type').value!=='interactive' || $('panel-tube').hidden ||
+      projectBusy || csvReading || exporting || !display || (interactiveDrag&&!interactiveDrag.released)) return;
+  if(interactiveDrag?.released)acceptInteractiveDrag();
+  const rect=canvas.getBoundingClientRect(), projectPoint=createProjector(rect.width,rect.height);
+  const x=e.clientX-rect.left,y=e.clientY-rect.top, samples=interactiveSamples(interactivePoints);
+  if(interactiveTool==='pin'&&!e.altKey) {
+    const axes=interactivePinAxes(projectPoint,rect);
+    const hit=axes.map(axis=>{
+      const dx=axis.end[0]-axis.origin[0],dy=axis.end[1]-axis.origin[1];
+      const t=((x-axis.origin[0])*dx+(y-axis.origin[1])*dy)/(dx*dx+dy*dy);
+      return {axis,t,distance:Math.hypot(x-axis.origin[0]-t*dx,y-axis.origin[1]-t*dy)};
+    }).filter(h=>h.t>.25&&h.t<1.15&&h.distance<8).sort((a,b)=>a.distance-b.distance)[0];
+    if(hit){e.preventDefault();e.stopImmediatePropagation();startInteractivePinMove(e,hit.axis,projectPoint);return;}
+  }
+  let best=null;
+  for(let i=1;i<samples.length;i++) {
+    const a=projectPoint(samples[i-1].point), b=projectPoint(samples[i].point),dx=b[0]-a[0],dy=b[1]-a[1],sq=dx*dx+dy*dy;
+    const t=sq?Math.max(0,Math.min(1,((x-a[0])*dx+(y-a[1])*dy)/sq)):0;
+    const distance=Math.hypot(x-a[0]-t*dx,y-a[1]-t*dy),depth=a[2]+t*(b[2]-a[2]);
+    if(distance<Math.max(8,Math.min(40,Number($('interactive-radius').value)*viewScale(rect.width,rect.height))) && (!best || distance<best.distance-1 || (Math.abs(distance-best.distance)<=1 && depth<best.depth)))
+      best={distance,depth,u:samples[i-1].u+t*(samples[i].u-samples[i-1].u)};
+  }
+  if(['tension','slack'].includes(interactiveTool)) {
+    e.preventDefault();e.stopImmediatePropagation();canvas.focus({preventScroll:true});
+    if(best)try {
+      const solver=FluixerInteractive[interactiveTool==='slack'?'createSlack':'createTension'](interactivePoints,interactiveSolverOptions(best.u));
+      FluixerInteractive.setSpanDuration(solver,0);
+      startInteractiveSolve(solver,interactiveTool);
+      interactiveDrag.id=e.pointerId;interactiveDrag.released=false;
+      interactiveDrag.holdStart=performance.now();
+      canvas.setPointerCapture(e.pointerId);
+    }
+    catch(error){status(error.message,true);}
+    return;
+  }
+  if(interactiveTool==='pin') {
+    e.preventDefault();e.stopImmediatePropagation();canvas.focus({preventScroll:true});
+    editInteractivePin(x,y,best,projectPoint,e.altKey);return;
+  }
+  if(!best) return;
+  markInteractiveEditing();
+  e.preventDefault();e.stopImmediatePropagation();stopAnimation();animationProgress=1;
+  canvas.focus({preventScroll:true});
+  interactiveDrag={id:e.pointerId,x:e.clientX,y:e.clientY,original:structuredClone(interactivePoints),
+    u:best.u,pins:interactivePins.slice(),stiffness:interactiveStiffness,originalTarget:interactiveTargetLength,
+    target:interactiveTargetLength,
+    collision:true,diameter:Number($('tube-diameter').value),
+    basis:cameraBasis(),scale:viewScale(rect.width,rect.height),project:projectPoint};
+  const d=interactiveDrag;
+  d.grabStep=2/d.scale; // Two CSS pixels per solver step at any view scale.
+  d.solver=FluixerInteractive.create(interactivePoints,d);
+  d.mouse=d.solver.anchor.slice();d.settled=0;d.releaseSteps=0;
+  if(d.solver.taut) status('The pinned section has no slack. Remove a pin to bend it.',true);
+  canvas.setPointerCapture(e.pointerId);draw();
+  d.frame=requestAnimationFrame(advanceInteractive);
+},true);
+canvas.addEventListener('pointermove',e=>{
+  const d=interactiveDrag;if(!d || d.id!==e.pointerId || d.released)return;
+  if(!(e.buttons&1)){finishInteractiveDrag(e);return;}
+  e.preventDefault();e.stopImmediatePropagation();
+  if(d.solver.spanEdit)return;
+  if(d.kind==='pin-move') {
+    const a=d.axis,amount=((e.clientX-d.x)*a.dx+(e.clientY-d.y)*a.dy)/(a.dx*a.dx+a.dy*a.dy)*a.size;
+    d.mouse=d.solver.anchor.map((v,k)=>v+(k===a.k?amount:0));return;
+  }
+  const dx=(e.clientX-d.x)/d.scale,dy=(e.clientY-d.y)/d.scale;
+  const delta=d.basis.right.map((v,k)=>dx*v-dy*d.basis.up[k]);
+  d.mouse=d.solver.anchor.map((v,k)=>v+delta[k]);
+},true);
+function advanceInteractive() {
+  const d=interactiveDrag;if(!d)return;
+  try {
+    const start=performance.now();
+    if(d.solver.spanEdit&&!d.released)FluixerInteractive.setSpanDuration(d.solver,(start-d.holdStart)/1000);
+    // Physics continues while the pointer is stationary and after release.
+    // Bound the work per paint; pointer events only update the grab target.
+    for(let substep=0;substep<3;substep++) {
+      interactivePoints=FluixerInteractive.step(d.solver,d.released&&d.kind!=='pin-move'?null:d.mouse);
+      if(d.released){
+        d.releaseSteps++;
+        const ramp=d.solver.spanEdit;
+        d.settled=d.solver.speed<.001&&(!ramp||Math.abs(ramp.target-ramp.desired)<1e-6)?d.settled+1:0;
+      }
+      if(performance.now()-start>10)break;
+    }
+    validateInteractivePoints(interactivePoints);
+    if(d.solver.spanEdit){interactiveTargetLength=FluixerInteractive.length(interactivePoints);syncInteractiveControls();}
+    if(!d.collision || !FluixerInteractive.collides(interactivePoints,d.diameter))
+      d.lastValid=structuredClone(interactivePoints);
+    if(d.released && (d.settled>=4 || d.releaseSteps>=180)) {
+      if(d.collision && FluixerInteractive.collides(interactivePoints,d.diameter)) {
+        interactivePoints=d.lastValid || d.original;
+        status('The constraints could not settle. The last valid curve was retained.',true);
+      }
+      if(d.solver.spanEdit)interactiveTargetLength=FluixerInteractive.length(interactivePoints);
+      acceptInteractiveDrag();return;
+    }
+    requestViewDraw();d.frame=requestAnimationFrame(advanceInteractive);
+  } catch(error) {cancelInteractiveDrag();status(error.message,true);}
+}
+function finishInteractiveDrag(e) {
+  if(!interactiveDrag || e.pointerId!==interactiveDrag.id)return;
+  const d=interactiveDrag;
+  if(d.released)return; // Releasing capture after pointerup is not cancellation.
+  e.preventDefault();e.stopImmediatePropagation();
+  if(e.type==='pointercancel' || e.type==='lostpointercapture') {cancelInteractiveDrag();return;}
+  if(d.solver.spanEdit)FluixerInteractive.setSpanDuration(d.solver,(performance.now()-d.holdStart)/1000);
+  d.released=true;
+  if(canvas.hasPointerCapture(d.id))canvas.releasePointerCapture(d.id);
+}
+for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,finishInteractiveDrag,true);
+window.addEventListener('blur',cancelInteractiveDrag);
+document.addEventListener('keydown',e=>{if(e.key==='Escape' && interactiveDrag){e.preventDefault();cancelInteractiveDrag();}});
+// INTERACTIVE_EDITOR_END
+
 let dragging = null;
 function endDrag(e) {
   if (!dragging || (e && e.pointerId !== dragging.id)) return;
@@ -1892,7 +2369,7 @@ function endDrag(e) {
   if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
 }
 canvas.addEventListener('pointerdown', (e) => {
-  if (dragging || !e.isPrimary || e.button !== 2) return;
+  if ((interactiveDrag&&!interactiveDrag.released) || dragging || !e.isPrimary || e.button !== 2) return;
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   dragging = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -1929,6 +2406,7 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
+    if (interactiveDrag&&!interactiveDrag.released) return;
     zoom = Math.max(
       0.1,
       Math.min(
@@ -1970,6 +2448,8 @@ function downloadBlob(blob, filename) {
 }
 
 async function requestOutputCsv(compensated) {
+  if(interactivePreviewDirty)throw Error('Wait for the updated curve preview before output');
+  if(calculationDisabled || display?.geometry_only)throw Error('Enable calculation before output');
     const data = {
       cylinder: display.cylinder || DEFAULT_TUBE,
       compensation: compensated ? selectedCurve() : uncompensatedPreviewCurve(),
@@ -2040,8 +2520,9 @@ function validateProject(value) {
     ...tubeNames, 'type', 'mapping', 'placement', 'initial_placement',
     ...(Object.hasOwn(tube, 'center') ? ['center'] : []),
     ...(tube.type === 'custom-step' ? ['source', 'reverse'] : []),
+    ...(tube.type === 'interactive' ? ['points', 'target_length', 'avoid_collisions', 'pins', 'stiffness'] : []),
   ]);
-  if (!['cylinder', 's-curve', 'hilbert', 'custom-step'].includes(tube.type) ||
+  if (!['cylinder', 's-curve', 'hilbert', 'custom-step', 'interactive'].includes(tube.type) ||
       tube.mapping !== 'projection')
     throw Error('Invalid project tube type or mapping');
   const vector = (v, length, min, max) =>
@@ -2120,7 +2601,7 @@ function currentProject() {
   return validateProject({
     format: PROJECT_FORMAT,
     schema_version: PROJECT_SCHEMA_VERSION,
-    pattern: shape.type === 'empty' ? { type: $('pattern-type').value, source: null } : shape,
+    pattern: shape.type === 'empty' ? { type: patternType(), source: null } : shape,
     compensation: selectedCurve(),
     cylinder: {
       ...tube,
@@ -2173,7 +2654,9 @@ function restoreProject(project, data) {
   display = data;
   resetAnimation();
   const shape = project.pattern;
-  $('pattern-type').value = shape.type;
+  $('pattern-type').value = shape.type==='spatial-brush'?'brush':shape.type;
+  $('brush-mode').value=shape.type==='spatial-brush'?'3d':'2d';
+  syncBrushMode(shape.type==='brush');
   $('spatial-fields').hidden = shape.type !== 'spatial-brush';
   if (shape.type === 'spatial-brush') {
     spatialWindows = shape.windows.map((w) => w.slice());
@@ -2210,7 +2693,7 @@ function restoreProject(project, data) {
   $('k-liquid').value = project.machine.k_liquid;
   $('unit').value = project.machine.unit;
   const rect = canvas.getBoundingClientRect();
-  planeVisible = project.view.plane_visible;
+  planeVisible = patternType()==='brush'||project.view.plane_visible;
   syncPlaneTools();
   yaw = project.view.yaw;
   pitch = project.view.pitch;
@@ -2281,7 +2764,7 @@ $('project-file').addEventListener('change', async () => {
     'k-gas',
     'k-liquid',
     'unit',
-    'pattern-type',
+    'pattern-type', 'brush-mode',
   ];
   for (const id of controls) $(id).disabled = true;
   $('project-status').textContent = 'Opening project…';
@@ -2356,7 +2839,7 @@ function followPlaneDirection(direction, oldRotation, newRotation) {
 }
 function planePoint(x, z) {
   const c = patternFrame(display.cylinder),
-    p = planeDrag ? placement : display.cylinder?.placement || placement;
+    p = placement || display.cylinder?.placement;
   return rotatePlane(
     [(x - c.radius) * p.scale[0], 0, (z - c.height / 2) * p.scale[2]],
     p.rotation,
@@ -2470,13 +2953,11 @@ function activePlanePlacement() {
   return placement;
 }
 function drawPlane(rect) {
-  if ($('pattern-type').value === 'spatial-brush') {
+  if (patternType() === 'spatial-brush') {
     planeHandles = [];
     return;
   }
-  const placement = planeDrag
-    ? activePlanePlacement()
-    : display?.cylinder?.placement || activePlanePlacement();
+  const placement = activePlanePlacement() || display?.cylinder?.placement;
   syncPlaneTools();
   planeHandles = [];
   if (!placement || !planeVisible || !display) return;
@@ -2500,7 +2981,7 @@ function drawPlane(rect) {
   ctx.stroke();
   ctx.lineWidth = 1;
   ctx.strokeStyle = uiColor('accent-text', '#C2141C');
-  for (const [x, z, a, b] of display.plane || []) {
+  for (const [x, z, a, b] of patternType()==='brush'?[]:(display.plane || [])) {
     const p = screen(planePoint(x, z)),
       q = screen(planePoint(a, b));
     ctx.beginPath();
@@ -2508,6 +2989,11 @@ function drawPlane(rect) {
     ctx.lineTo(q[0], q[1]);
     ctx.stroke();
   }
+  if(patternType()==='brush') {
+    const m=brushPlaneMapping();
+    if(m){ctx.save();ctx.transform(m.ax,m.ay,m.bx,m.by,m.o[0],m.o[1]);ctx.imageSmoothingEnabled=false;ctx.drawImage(brushCanvas,0,0);ctx.restore();}
+  }
+  if(!$('plane-tool').value||(patternType()==='brush'&&brushErase!==null)){ctx.restore();return;}
   ctx.globalAlpha = 1;
   const origin = screen(placement.position),
     length = modelFrame().extent * 0.25,
@@ -2573,7 +3059,8 @@ function drawPlane(rect) {
       ctx.stroke();
       handle(end, i, 'move', colors[i]);
       ctx.fillText('XYZ'[i], end[0] + 10, end[1]);
-      handle(screen(offset(axis, length * 0.7)), i, 'scale', colors[i]);
+      // The pattern lies in local XZ; local Y is its normal and has no scale handle.
+      if (i !== 1) handle(screen(offset(axis, length * 0.7)), i, 'scale', colors[i]);
       const rotateU = screen(offset(u, length * 0.48))
           .slice(0, 2)
           .map((v, j) => v - origin[j]),
@@ -2631,10 +3118,11 @@ function syncPlaneTools() {
     ['tool-direction', 'direction'],
   ]) {
     $(id).ariaPressed = String(!!placement && planeVisible && $('plane-tool').value === mode);
-    $(id).disabled = !placement || !planeVisible || projectBusy || !!importedCsv || csvReading;
+    $(id).disabled = patternType()==='spatial-brush' || calculationDisabled || !placement || !planeVisible || projectBusy || !!importedCsv || csvReading;
   }
-  $('plane-reset').disabled = projectBusy || !!importedCsv || csvReading;
-  $('plane-toggle').ariaPressed = String(!!placement && planeVisible);
+  $('plane-reset').disabled = patternType()==='spatial-brush' || calculationDisabled || projectBusy || !!importedCsv || csvReading;
+  $('plane-toggle').disabled = patternType()==='spatial-brush' || calculationDisabled || !!importedCsv?.standard;
+  $('plane-toggle').ariaPressed = String(patternType()!=='spatial-brush' && !!placement && planeVisible);
 }
 for (const [id, mode] of [
   ['tool-gumball', 'gumball'],
@@ -2642,13 +3130,15 @@ for (const [id, mode] of [
 ])
   $(id).addEventListener('click', () => {
     if (!placement || !planeVisible || projectBusy || importedCsv || csvReading) return;
-    $('plane-tool').value = mode;
+    if(patternType()==='brush'){brushErase=null;syncBrushTool();}
+    $('plane-tool').value = $('plane-tool').value === mode ? '' : mode;
     syncPlaneTools();
     draw();
   });
 $('plane-toggle').addEventListener('click', () => {
+  if (importedCsv?.standard) return;
   planeVisible = !planeVisible;
-  if (planeVisible) $('plane-tool').value = 'gumball';
+  $('plane-tool').value = '';
   syncPlaneTools();
   draw();
 });
@@ -2662,7 +3152,8 @@ canvas.addEventListener(
   'pointerdown',
   (e) => {
     if (
-      $('pattern-type').value === 'spatial-brush' ||
+      calculationDisabled ||
+      patternType() === 'spatial-brush' ||
       e.button !== 0 ||
       !placement ||
       !planeVisible ||
@@ -2690,6 +3181,8 @@ canvas.addEventListener(
       lastX: x,
       lastY: y,
       turn: 0,
+      worldLength: modelFrame().extent * 0.25,
+      basis: cameraBasis(),
       start: JSON.parse(JSON.stringify(placement)),
     };
     canvas.setPointerCapture(e.pointerId);
@@ -2700,6 +3193,7 @@ canvas.addEventListener(
   'pointermove',
   (e) => {
     if (!planeDrag || planeDrag.id !== e.pointerId) return;
+    if (!(e.buttons & 1)) { finishPlane(e); return; }
     e.preventDefault();
     e.stopImmediatePropagation();
     const r = canvas.getBoundingClientRect(),
@@ -2710,7 +3204,7 @@ canvas.addEventListener(
     if (h.mode === 'depth') {
       p.depth = depthFromDrag(h.start.depth || 160, dx, dy, h.unit, h.travel, h.maxDepth);
     } else if (h.mode === 'direction') {
-      const b = cameraBasis();
+      const b = h.basis;
       p.direction = p.direction.map((v, i) => v + (dx * b.right[i] - dy * b.up[i]) / 80);
       const n = Math.hypot(...p.direction);
       if (n < 0.01) return;
@@ -2727,7 +3221,7 @@ canvas.addEventListener(
       const delta = (dx * vx + dy * vy) / n;
       if (h.mode === 'move') {
         const axis = objectAxis(h.start.rotation, h.axis),
-          distance = (delta * modelFrame().extent * 0.25) / n;
+          distance = (delta * h.worldLength) / n;
         p.position = p.position.map((v, i) => v + axis[i] * distance);
       } else {
         const factor = Math.max(0.01, Math.min(100, 1 + delta / 80));
@@ -2742,9 +3236,13 @@ canvas.addEventListener(
 );
 function finishPlane(e) {
   if (!planeDrag || e.pointerId !== planeDrag.id) return;
+  const drag = planeDrag;
   planeDrag = null;
+  if (e.type === 'pointercancel' || e.type === 'lostpointercapture') placement = clonePlane(drag.start);
+  if (canvas.hasPointerCapture(drag.id)) canvas.releasePointerCapture(drag.id);
   loadDisplay();
 }
+canvas.addEventListener('lostpointercapture', finishPlane, true);
 canvas.addEventListener('pointerup', finishPlane, true);
 canvas.addEventListener('pointercancel', finishPlane, true);
 loadDisplay();
@@ -2827,27 +3325,44 @@ function spatialHitMap(data, rect, projection, scale) {
     }
     distance += segment.length;
   }
-  return { cell, width, height, hits, pad: cell / scale / data.path_length };
+  return { cell, width, height, hits, depths, scale, diameter: data.cylinder.diameter,
+    pad: cell / scale / data.path_length };
 }
-function spatialStamp(x, y, stroke) {
-  const { map, radius } = stroke,
-    windows = [];
-  for (
-    let row = Math.max(0, Math.floor((y - radius) / map.cell));
-    row <= Math.min(map.height - 1, Math.ceil((y + radius) / map.cell));
-    row++
-  )
-    for (
-      let col = Math.max(0, Math.floor((x - radius) / map.cell));
-      col <= Math.min(map.width - 1, Math.ceil((x + radius) / map.cell));
-      col++
-    ) {
-      if (Math.hypot((col + 0.5) * map.cell - x, (row + 0.5) * map.cell - y) > radius) continue;
-      const u = map.hits[row * map.width + col];
-      if (u >= 0) windows.push([Math.max(0, u - map.pad), Math.min(1, u + map.pad)]);
+// Select a foreground layer for the whole brush footprint, not a ray per pixel.
+// Gaps between front tubes must not expose distant tubes to paint or erase.
+function spatialStamp(x, y, stroke, windows = []) {
+  const { map, radius } = stroke;
+  stroke.visited ||= new Uint8Array(map.width * map.height);
+  const radiusSquared = radius * radius, candidates = [];
+  let front = Infinity;
+  for (let row = Math.max(0, Math.floor((y - radius) / map.cell));
+    row <= Math.min(map.height - 1, Math.ceil((y + radius) / map.cell)); row++) {
+    const dy = (row + .5) * map.cell - y;
+    for (let col = Math.max(0, Math.floor((x - radius) / map.cell));
+      col <= Math.min(map.width - 1, Math.ceil((x + radius) / map.cell)); col++) {
+      const dx = (col + .5) * map.cell - x;
+      if (dx * dx + dy * dy > radiusSquared) continue;
+      const index = row * map.width + col;
+      if (map.hits[index] < 0) continue;
+      // Already painted cells still occlude the back layer on later stamps.
+      front = Math.min(front, map.depths[index]);
+      candidates.push(index);
     }
+  }
+  // Allow local surface curvature and tube thickness, independently of zoom.
+  const back = front + Math.max(map.diameter, radius / map.scale);
+  for (const index of candidates) {
+    if (stroke.visited[index] || map.depths[index] > back) continue;
+    stroke.visited[index] = 1;
+    const u = map.hits[index];
+    windows.push([Math.max(0, u - map.pad), Math.min(1, u + map.pad)]);
+  }
+  return windows;
+}
+function applySpatialMarks(windows, erase) {
+  if (!windows.length) return false;
   const marks = mergeSpatial(windows);
-  if (spatialErase) {
+  if (erase) {
     for (const [a, b] of marks)
       spatialWindows = spatialWindows.flatMap(([lo, hi]) =>
         hi <= a || lo >= b
@@ -2855,28 +3370,42 @@ function spatialStamp(x, y, stroke) {
           : [...(lo < a ? [[lo, a]] : []), ...(hi > b ? [[b, hi]] : [])],
       );
   } else spatialWindows = mergeSpatial([...spatialWindows, ...marks]);
+  return true;
+}
+let spatialRefresh = null;
+function scheduleSpatialRefresh() {
+  if (spatialRefresh !== null) return;
+  const flush = () => {
+    if (patternType() !== 'spatial-brush' || importedCsv || projectBusy) {
+      spatialRefresh = null;
+      return;
+    }
+    // Let the active response render instead of invalidating it on every move.
+    if (previewLoading) { spatialRefresh = setTimeout(flush, 32); return; }
+    spatialRefresh = null;
+    loadDisplay();
+  };
+  spatialRefresh = requestAnimationFrame(flush);
 }
 function syncSpatialControls() {
-  $('spatial-pen').ariaPressed = String(!spatialErase);
-  $('spatial-eraser').ariaPressed = String(spatialErase);
-  for (const id of ['spatial-pen', 'spatial-eraser', 'spatial-size']) $(id).disabled = projectBusy;
-  syncHistoryButtons();
+  syncViewEditTools();
+  $('spatial-pen').ariaPressed = String(spatialErase===false);
+  $('spatial-eraser').ariaPressed = String(spatialErase===true);
+  canvas.style.cursor=(patternType()==='spatial-brush'&&spatialErase!==null)||(patternType()==='brush'&&brushErase!==null)?'crosshair':'';
+  for (const id of ['spatial-pen', 'spatial-eraser', 'spatial-size']) $(id).disabled = projectBusy || csvReading || !!importedCsv;
+
   $('spatial-clear').disabled = projectBusy || !spatialWindows.length;
   syncSliderFill($('spatial-size'));
 }
 $('spatial-size').addEventListener('input', () => syncSliderFill($('spatial-size')));
 syncSpatialControls();
-$('spatial-pen').addEventListener('click', () => {
-  spatialErase = false;
-  $('spatial-pen').ariaPressed = 'true';
-  $('spatial-eraser').ariaPressed = 'false';
-});
-$('spatial-eraser').addEventListener('click', () => {
-  spatialErase = true;
-  $('spatial-pen').ariaPressed = 'false';
-  $('spatial-eraser').ariaPressed = 'true';
-});
-$('spatial-undo').addEventListener('click', () => moveEditHistory());
+for(const [id,erase] of [['spatial-pen',false],['spatial-eraser',true]]) {
+  $(id).addEventListener('click',()=>{
+    cancelInteractiveDrag();interactiveTool=null;syncInteractiveControls();selectSidebarTab('pattern');
+    spatialErase=spatialErase===erase?null:erase;
+    syncSpatialControls();
+  });
+}
 $('spatial-clear').addEventListener('click', () => {
   if (projectBusy || !spatialWindows.length) return;
   spatialWindows = [];
@@ -2887,7 +3416,8 @@ canvas.addEventListener(
   (e) => {
     if (
       e.button !== 0 ||
-      $('pattern-type').value !== 'spatial-brush' ||
+      patternType() !== 'spatial-brush' ||
+      spatialErase === null ||
       importedCsv ||
       csvReading ||
       !display ||
@@ -2902,6 +3432,7 @@ canvas.addEventListener(
     spatialStroke = {
       id: e.pointerId,
       rect,
+      erase: spatialErase,
       radius: Number($('spatial-size').value) / 2,
       map: spatialHitMap(
         display,
@@ -2913,8 +3444,8 @@ canvas.addEventListener(
       y: e.clientY - rect.top,
     };
     canvas.setPointerCapture(e.pointerId);
-    spatialStamp(spatialStroke.x, spatialStroke.y, spatialStroke);
-    loadDisplay();
+    if (applySpatialMarks(spatialStamp(spatialStroke.x, spatialStroke.y, spatialStroke), spatialStroke.erase))
+      scheduleSpatialRefresh();
   },
   true,
 );
@@ -2934,15 +3465,16 @@ canvas.addEventListener(
         1,
         Math.ceil(Math.hypot(x - stroke.x, y - stroke.y) / Math.max(1, stroke.radius / 3)),
       );
+    const marks = [];
     for (let i = 1; i <= n; i++)
       spatialStamp(
         stroke.x + ((x - stroke.x) * i) / n,
         stroke.y + ((y - stroke.y) * i) / n,
-        stroke,
+        stroke, marks,
       );
     stroke.x = x;
     stroke.y = y;
-    loadDisplay();
+    if (applySpatialMarks(marks, stroke.erase)) scheduleSpatialRefresh();
   },
   true,
 );
@@ -3038,15 +3570,23 @@ for (const key of sidebarTabKeys) {
 selectSidebarTab('pattern');
 
 function setExportDisabled(disabled) {
-  $('export').disabled = disabled;
-  $('export-original').disabled = disabled;
+  $('export').disabled = disabled || interactivePreviewDirty || calculationDisabled || !!display?.geometry_only;
+  $('export-original').disabled = disabled || interactivePreviewDirty || calculationDisabled || !!display?.geometry_only;
 }
 function syncCompensationPreview() {
   const standard = !!importedCsv?.standard;
   const supported = ['cylinder', 's-curve'].includes($('tube-type').value);
   $('view-compensated').setAttribute('aria-pressed', String(standard || (supported && compensatedPreview)));
-  $('view-compensated').disabled = !supported || !!importedCsv || csvReading || projectBusy || exporting || previewLoading;
+  $('view-compensated').disabled = calculationDisabled || !supported || !!importedCsv || csvReading || projectBusy || exporting || previewLoading;
 }
+$('view-no-calculation').addEventListener('click',()=>{
+  calculationDisabled=!calculationDisabled;
+  $('view-no-calculation').ariaPressed=String(calculationDisabled);
+  stopAnimation(false);animationProgress=1;
+  document.querySelector('.legend').hidden=calculationDisabled;
+  syncCompensationPreview();syncRenderControls();syncPlaneTools();syncPlayback();setExportDisabled(true);
+  loadDisplay();
+});
 $('view-compensated').addEventListener('click', () => {
   if ($('view-compensated').disabled) return;
   compensatedPreview = !compensatedPreview;
@@ -3054,6 +3594,9 @@ $('view-compensated').addEventListener('click', () => {
 });
 
 function syncCsvControls() {
+  syncStepControls();
+  $('image-clear').disabled = projectBusy || !(imageRaster || imageActive || imagePhotoSource);
+  $('brush-clear').disabled = projectBusy || !brushPixels.some(Boolean);
   syncCompensationPreview();
   // A disabled fieldset preserves each control's own enabled/disabled state.
   // Inert also locks canvas editors and prevents keyboard focus while previewing.
@@ -3071,7 +3614,7 @@ function syncCsvControls() {
   const busy = projectBusy || previewLoading || exporting || csvReading;
   $('csv-import').disabled = !display || busy || !!importedCsv?.standard;
   const standard = !!importedCsv?.standard;
-  const standardUnavailable = busy || !['cylinder', 's-curve'].includes($('tube-type').value) || (!!importedCsv && !standard);
+  const standardUnavailable = calculationDisabled || busy || !['cylinder', 's-curve'].includes($('tube-type').value) || (!!importedCsv && !standard);
   $('calibration-standard').disabled = standardUnavailable;
   $('csv-preview-clear').hidden = !importedCsv;
   $('csv-preview-clear').disabled = busy;
@@ -3086,6 +3629,7 @@ function csvPreviewMetrics() {
   syncCurrentOutput();
   if (!display) return;
   $('total').textContent = display.path_length.toFixed(2) + ' mm';
+  if(calculationDisabled || display.geometry_only){$('count').textContent='—';return;}
   if (importedCsv) {
     const windows = csvPreviewWindows(importedCsv, display.path_length, 1);
     let count = 0, cursor = 0;
@@ -3198,7 +3742,7 @@ function standardPreviewSequence(standard) {
 }
 
 async function startCalibPreview() {
-  if (!calibPreviewPending || $('panel-calibration').hidden || projectBusy || csvReading || exporting || previewLoading || !display) return;
+  if (calculationDisabled || !calibPreviewPending || $('panel-calibration').hidden || projectBusy || csvReading || exporting || previewLoading || !display) return;
   if (!['cylinder', 's-curve'].includes($('tube-type').value)) return;
   calibPreviewPending = false;
   calibPreviewReading = true;
@@ -3208,7 +3752,7 @@ async function startCalibPreview() {
   syncPlayback();
   try {
     const standard = await fetchStandardPattern();
-    if (token !== csvReadId || $('panel-calibration').hidden || projectBusy) return;
+    if (calculationDisabled || token !== csvReadId || $('panel-calibration').hidden || projectBusy) return;
     if (sourceDisplay !== display || sourceRequest !== requestId) {
       calibPreviewPending = true;
       return;
@@ -3255,16 +3799,17 @@ $('calibration-standard').addEventListener('click', async () => {
 
 // Model edits have their own snapshots; camera and playback are intentionally absent.
 const editFieldIds = [
-  'pattern-type', 'tube-type', 'mapping-type', ...tubeNames.map(n => 'tube-' + n),
+  'pattern-type', 'brush-mode', 'tube-type', 'mapping-type', ...tubeNames.map(n => 'tube-' + n),
   'pre-add', 'length-per-100-steps', 'speed', 'k-gas', 'k-liquid', 'unit',
   'image-mode', 'image-threshold', 'image-invert',
+
 ];
 function captureEditState() {
   return {
     fields: Object.fromEntries(editFieldIds.map(id => [id, { value: $(id).value, checked: $(id).checked }])),
     curve: { ...structuredClone(curveState), amplitude: $('curve-amplitude').value },
     center: structuredClone(tubeCenter), placement: clonePlane(placement), initialPlacement: clonePlane(initialPlacement),
-    tubeStepSource, tubeStepReverse, innerDiameter,
+    tubeStepSource, tubeStepReverse, innerDiameter, interactivePoints: structuredClone(interactivePoints), interactiveTargetLength, interactivePins: interactivePins.slice(), interactiveStiffness,
     brushPixels: brushPixels.slice(), brushActive: structuredClone(brushActive),
     spatialWindows: structuredClone(spatialWindows), stepActive: structuredClone(stepActive), stepPlacement: structuredClone(stepPlacement),
     imageActive: structuredClone(imageActive), imageRaster, imagePhoto, imagePhotoSource,
@@ -3277,6 +3822,7 @@ function sameEditState(a, b) {
   return content(a) === content(b);
 }
 function restoreEditState(s) {
+  if (interactiveDrag) cancelInteractiveDrag();
   ++requestId; ++imageReadId; ++imageProcessId; ++stepReadId; ++tubeStepReadId;
   imagePhotoPending = null;
   for (const [id, field] of Object.entries(s.fields)) {
@@ -3285,6 +3831,10 @@ function restoreEditState(s) {
   }
   tubeKind = $('tube-type').value;
   tubeCenter = structuredClone(s.center); placement = clonePlane(s.placement); initialPlacement = clonePlane(s.initialPlacement);
+  interactivePoints = structuredClone(s.interactivePoints);
+  interactiveTargetLength = s.interactiveTargetLength;
+  interactivePins = s.interactivePins.slice();
+  interactiveStiffness = s.interactiveStiffness;
   tubeStepSource = s.tubeStepSource; tubeStepReverse = s.tubeStepReverse;
   $('tube-step-reverse').ariaPressed = String(tubeStepReverse);
   innerDiameter = s.innerDiameter;
@@ -3297,34 +3847,29 @@ function restoreEditState(s) {
   imageActive = structuredClone(s.imageActive); imageRaster = s.imageRaster;
   imagePhoto = s.imagePhoto; imagePhotoSource = s.imagePhotoSource;
   for (const n of tubeNames) $('tube-slider-' + n).value = $('tube-' + n).value;
-  canvas.style.cursor = $('pattern-type').value === 'spatial-brush' ? 'crosshair' : '';
+  canvas.style.cursor = patternType() === 'spatial-brush' && spatialErase !== null ? 'crosshair' : '';
+  syncBrushMode(patternType()==='brush');
   tubeLabels(); paintBrush(); paintImage(); syncRenderControls(); syncPlaneTools();
   document.querySelectorAll('input[type="range"]').forEach(syncSliderFill);
   loadDisplay();
 }
 function commitEditHistory() {
-  if (!editHistory || projectBusy || csvReading || imageHistoryPending) return;
+  if (!editHistory || projectBusy || csvReading || imageHistoryPending || interactiveDrag) return;
   editHistory.checkpoint();
 }
-function syncHistoryButtons() {
-  if (!editHistory) return;
-  const disabled = projectBusy || csvReading || !editHistory.available();
-  $('brush-undo').disabled = disabled;
-  $('spatial-undo').disabled = disabled;
-}
 function moveEditHistory(redo = false) {
+  if (interactiveDrag) {cancelInteractiveDrag();return;}
   if (!editHistory || projectBusy || csvReading || stepBusy || exporting || imageHistoryPending) return;
   editHistory.move(redo);
 }
 editHistory = new FluixerHistory.History({
   capture: captureEditState, restore: restoreEditState, equal: sameEditState,
   scope: () => importedCsv && !importedCsv.standard ? importedCsv : null,
-  changed: syncHistoryButtons,
 });
 let editPointer = null;
 document.addEventListener('pointerdown', event => {
   if (event.button !== 0 || event.target.closest('dialog') || projectBusy || csvReading || imageHistoryPending) return;
-  if (!event.target.matches('input[type="range"], #brush-canvas, #curve-preview, #preview')) return;
+  if (!event.target.matches('input[type="range"], #curve-preview, #preview')) return;
   editHistory.held = true; editPointer = event.pointerId;
 }, true);
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) document.addEventListener(name, event => {
@@ -3345,12 +3890,12 @@ document.addEventListener('keydown', event => {
   event.preventDefault();
   if (!event.repeat) moveEditHistory(action === 'redo');
 });
-syncHistoryButtons();
+
 
 FluixerSerial.init({
   state: () => ({
     imported: !!importedCsv && !importedCsv.standard,
-    available: !!display && !projectBusy && !previewLoading && !csvReading && !exporting &&
+    available: !interactivePreviewDirty && !calculationDisabled && !display?.geometry_only && !!display && !projectBusy && !previewLoading && !csvReading && !exporting &&
       !importedCsv?.standard && (!!importedCsv || display.pattern_config?.type !== 'empty'),
   }),
   source: async compensated => {

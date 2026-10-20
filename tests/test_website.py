@@ -14,6 +14,13 @@ class WebsiteTests(unittest.TestCase):
         self.client=self.app.test_client()
         self.base='https://fluixer.example'
         self.headers={'Authorization':'Basic '+base64.b64encode(b'guest:test-password-for-ci-only').decode(),'Origin':self.base}
+    def test_geometry_only_preview(self):
+        with patch('fluixer.webapp.pattern_key', side_effect=AssertionError('pattern calculation called')):
+            response=self.client.post('/api/display',base_url=self.base,headers=self.headers,json={
+                'geometry_only':True,'cylinder':dict(radius=40,diameter=4,height=75,wind=16)})
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(response.json['geometry_only'])
+
     def test_auth(self):
         for path in ['/','/app.js','/api/display','/api/image','/api/export','/api/step','/api/tube-step']:
             r=self.client.get(path,base_url=self.base)

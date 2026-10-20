@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 import webbrowser
 from .pipeline import path_bounds,pattern_frame,pattern_bounds,simulate_along_path,cylinder_settings,cylinder_config,CylinderSettings
 from .geometry import UpwardSemicircle, CircularArc
+from .cubic import CubicSpan
 from .compensation import curve_settings, curve_config
 from .step_input import parse_step
 from .tube_step import parse_tube_step
@@ -50,8 +51,11 @@ def preview(pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
     samples=[(0.0,display.path.pieces[0].point_at(0))]
     distance=0.0
     for piece in display.path.pieces:
-        count=36 if isinstance(piece,(UpwardSemicircle,CircularArc)) else 1
-        for i in range(1,count+1):samples.append((distance+piece.length*i/count,piece.point_at(i/count)))
+        count=36 if isinstance(piece,(UpwardSemicircle,CircularArc)) else 8 if cylinder.type=="interactive" and isinstance(piece,CubicSpan) else 1
+        for i in range(1,count+1):
+            t=i/count
+            offset=piece.length_to(t) if cylinder.type=='interactive' and isinstance(piece,CubicSpan) else piece.length*t
+            samples.append((distance+offset,piece.point_at(t)))
         distance+=piece.length
     segments=[]
     cursor=0
@@ -81,6 +85,31 @@ def preview(pattern=(),curve=curve_settings(),cylinder=CylinderSettings()):
         'pattern_config':{'type':'spatial-brush','windows':[list(w) for w in pattern[1]]} if pattern and pattern[0]=='spatial-brush' else {'type':'empty'} if pattern==('empty',) else dict(type=pattern[0],source=pattern[1],**dict(zip(('width','height','x','z'),pattern[2:]))) if pattern and pattern[0] in ('step','brush','image') else {'type':'captured-s'},'length_unit':'mm',
         'path_length':display.path.length,'segments':segments,
         'liquid_length':sum(s.length for s in display.sequence.segments if s.phase=='liquid')}
+
+
+@lru_cache(maxsize=8)
+def geometry_preview(cylinder):
+    """Build only the tube geometry; never partition the pattern into phases."""
+    from .pipeline import tube_path
+    path=tube_path(cylinder)
+    points=[path.pieces[0].point_at(0)]
+    for piece in path.pieces:
+        count=36 if isinstance(piece,(UpwardSemicircle,CircularArc)) else 8 if isinstance(piece,CubicSpan) else 1
+        points.extend(piece.point_at(i/count) for i in range(1,count+1))
+    return {'geometry_only':True,'bounds':path_bounds(path),'plane':[],
+        'cylinder':cylinder_config(cylinder),'compensation':curve_config(curve_settings()),
+        'pattern':'','pattern_config':{'type':'empty'},'length_unit':'mm',
+        'path_length':path.length,'liquid_length':0,
+        'segments':[{'phase':'gas','length':path.length,'points':points}]}
+
+
+def display_payload(data):
+    if not isinstance(data,dict) or set(data)-{'pattern','compensation','cylinder','pre_add','geometry_only'}:
+        raise ValueError('Invalid preview parameters')
+    if not isinstance(data.get('geometry_only',False),bool):raise ValueError('Invalid geometry-only mode')
+    cylinder=cylinder_settings(data.get('cylinder'))
+    if data.get('geometry_only'):return geometry_preview(cylinder)
+    return preview(pattern_key(data.get('pattern'),cylinder),curve_settings(data.get('compensation')),cylinder)
 
 
 def csv_payload(data):
@@ -130,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.local_request():return
         url=urlsplit(self.path)
-        assets={'/serial-controller.js':('serial-controller.js','text/javascript'),'/history.js':('history.js','text/javascript'),'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/tube-renderer.js':('tube-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
+        assets={'/interactive-constraints.js':('interactive-constraints.js','text/javascript'),'/serial-controller.js':('serial-controller.js','text/javascript'),'/history.js':('history.js','text/javascript'),'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/tube-renderer.js':('tube-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
         for asset in (Path(__file__).parent/'ui').glob('svg/*.svg'):
             assets['/svg/'+asset.name]=('svg/'+asset.name,'image/svg+xml')
         for asset in (Path(__file__).parent/'ui').glob('css/*.css'):
@@ -176,9 +205,7 @@ class Handler(BaseHTTPRequestHandler):
                 with _lock:payload=({'/api/step':parse_step,'/api/tube-step':parse_tube_step}[self.path])(data['source'])
                 self.send(200,json.dumps(payload).encode(),'application/json');return
             if self.path=='/api/display':
-                if not isinstance(data,dict) or set(data)-{'pattern','compensation','cylinder','pre_add'}:raise ValueError('Invalid preview parameters')
-                cylinder=cylinder_settings(data.get('cylinder'))
-                with _lock:payload=preview(pattern_key(data.get('pattern'),cylinder),curve_settings(data.get('compensation')),cylinder)
+                with _lock:payload=display_payload(data)
                 self.send(200,json.dumps(payload).encode(),'application/json');return
             with _lock:body,name,rows=csv_payload(data)
         except (ValueError,TypeError,OverflowError) as exc:

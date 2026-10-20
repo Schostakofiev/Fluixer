@@ -240,6 +240,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     for (const p of points()) { ctx.beginPath(); ctx.arc(p.x, p.y, line * 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   }
   function refresh() {
+    $('points-clear').disabled = locked() || reading || !manual.length;
     clearTimeout(timer); result = null; scale = null;
     $('apply').disabled = true; $('download').disabled = true;
     $('result').textContent = ''; $('error').textContent = '';

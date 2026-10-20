@@ -12,7 +12,7 @@ from werkzeug.exceptions import HTTPException
 from . import __version__
 from .compensation import curve_settings
 from .pipeline import cylinder_settings
-from .webapp import csv_payload, pattern_key, preview, _lock
+from .webapp import csv_payload, pattern_key, preview, display_payload, _lock
 
 
 def create_app(config=None):
@@ -76,7 +76,7 @@ def create_app(config=None):
 
     @app.get('/<path:asset>')
     def asset(asset):
-        allowed = asset in {'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'tube-renderer.js', 'style.css'}
+        allowed = asset in {'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'tube-renderer.js', 'style.css'}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('svg/*.svg')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}
@@ -119,11 +119,8 @@ def create_app(config=None):
                     body, name, rows = csv_payload(data)
                 return Response(body, content_type='text/csv; charset=utf-8', headers={'Content-Disposition': f'attachment; filename="{name}"', 'X-Row-Count': str(rows)})
             if operation == 'display':
-                if set(data) - {'pattern', 'compensation', 'cylinder', 'pre_add'}:
-                    raise ValueError('Invalid preview parameters')
-                cylinder = cylinder_settings(data.get('cylinder'))
                 with _lock:
-                    result = preview(pattern_key(data.get('pattern'), cylinder), curve_settings(data.get('compensation')), cylinder)
+                    result = display_payload(data)
                 return jsonify(result)
             if set(data) != {'source'}:
                 raise ValueError('Expected a source field')

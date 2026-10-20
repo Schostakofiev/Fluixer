@@ -11,6 +11,7 @@
     <script src="/history.js" defer></script>
     <script src="/visual-calibration.js" defer></script>
     <script src="/serial-controller.js" defer></script>
+    <script src="/interactive-constraints.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -100,8 +101,11 @@
               <option value="step">STEP</option>
               <option value="image">Image</option>
               <option value="brush">Brush</option>
-              <option value="spatial-brush">Spatial Brush</option>
             </select>
+            <div id="brush-mode-fields" hidden>
+              <label for="brush-mode">Brush Mode</label>
+              <select class="inp" id="brush-mode"><option value="2d">2D</option><option value="3d">3D</option></select>
+            </div>
             <div id="image-fields" hidden>
               <h2>Image Input</h2>
               <button class="btn btn-outline" id="image-open" type="button">Import</button>
@@ -127,11 +131,12 @@
                 Invert Colors
               </label>
               <canvas id="image-preview" width="256" height="256" aria-label="Preview"></canvas>
-              <button class="btn btn-outline" id="image-clear" type="button">Clear</button>
+              <button class="btn btn-outline btn-danger" id="image-clear" type="button">Clear</button>
               <p id="image-status" role="status"></p>
             </div>
             <div id="spatial-fields" hidden>
-              <label for="spatial-size">Size</label>
+
+              <label for="spatial-size">Brush Size</label>
               <input
                 class="slider"
                 id="spatial-size"
@@ -139,54 +144,15 @@
                 min="4"
                 max="80"
                 value="24"
-                aria-label="Size"
+                aria-label="Brush Size"
               />
-              <div class="pair">
-                <button class="btn btn-outline" id="spatial-pen" type="button" aria-pressed="true">
-                  Brush
-                </button>
-                <button
-                  class="btn btn-outline"
-                  id="spatial-eraser"
-                  type="button"
-                  aria-pressed="false"
-                >
-                  Eraser
-                </button>
-              </div>
-              <div class="pair">
-                <button class="btn btn-outline" id="spatial-undo" type="button">Undo</button>
-                <button class="btn btn-outline" id="spatial-clear" type="button">Clear</button>
-              </div>
+              <button class="btn btn-outline btn-danger" id="spatial-clear" type="button">Clear</button>
             </div>
             <div id="brush-fields" hidden>
-              <h2>Drawing</h2>
-              <div class="pair">
-                <button class="btn btn-outline" id="brush-pen" type="button" aria-pressed="true">
-                  Brush
-                </button>
-                <button
-                  class="btn btn-outline"
-                  id="brush-eraser"
-                  type="button"
-                  aria-pressed="false"
-                >
-                  Eraser
-                </button>
-              </div>
+
               <label for="brush-size">Brush Size</label>
               <input class="slider" id="brush-size" type="range" min="2" max="64" value="16" />
-              <canvas
-                id="brush-canvas"
-                width="256"
-                height="256"
-                aria-label="Drawing Board"
-                tabindex="0"
-              ></canvas>
-              <div class="pair">
-                <button class="btn btn-outline" id="brush-undo" type="button" disabled>Undo</button>
-                <button class="btn btn-outline" id="brush-clear" type="button">Clear</button>
-              </div>
+              <button class="btn btn-outline btn-danger" id="brush-clear" type="button">Clear</button>
               <p id="brush-status" class="note" role="status"></p>
             </div>
             <div id="step-fields" hidden>
@@ -198,6 +164,7 @@
               <button class="btn btn-outline" id="step-apply" type="button" disabled>
                 Confirm
               </button>
+              <button class="btn btn-outline btn-danger" id="step-clear" type="button" disabled>Clear</button>
             </div>
             <label for="mapping-type">Mapping Type</label>
             <select class="inp" id="mapping-type">
@@ -234,7 +201,26 @@
               <option value="s-curve">S-Shape</option>
               <option value="hilbert">Hilbert</option>
               <option value="custom-step">Custom</option>
+              <option value="interactive">Interactive</option>
             </select>
+            <div id="interactive-fields" hidden>
+
+              <label for="interactive-stiffness">Stiffness</label>
+              <div class="slider-number-row">
+                <input class="slider" id="interactive-stiffness" type="range" min="0" max="100" step="1" value="20" />
+                <input class="inp" id="interactive-stiffness-value" type="number" min="0" max="100" step="1" value="20" aria-label="Stiffness" />
+              </div>
+              <label for="interactive-radius">Grab Radius (mm)</label>
+              <div class="slider-number-row">
+                <input class="slider" id="interactive-radius" type="range" min="1" max="50" value="3" />
+                <input class="inp" id="interactive-radius-value" type="number" min="1" max="50" value="3" aria-label="Grab Radius (mm)" />
+              </div>
+              <label for="interactive-length">Total Length (mm)</label>
+              <div class="slider-number-row">
+                <input class="slider" id="interactive-length" type="range" min="10" max="1000" step="any" value="80" />
+                <input class="inp" id="interactive-length-value" type="number" min="10" max="1000" step="1" value="80" aria-label="Total Length (mm)" />
+              </div>
+            </div>
             <div id="tube-step-fields" hidden>
               <button class="btn btn-outline" id="tube-step-open" type="button">Import</button>
               <input id="tube-step-file" type="file" accept=".stp,.step" hidden />
@@ -498,6 +484,9 @@
         <div class="viewport">
         <div class="view-header">
           <div class="view-buttons">
+            <button id="view-no-calculation" class="btn-icon" type="button" aria-label="Disable Calculation" title="Disable Calculation" aria-pressed="false">
+              <img class="ico button-svg" src="/svg/view-no-calculation.svg" alt="" aria-hidden="true" draggable="false" />
+            </button>
             <button id="view-compensated" class="btn-icon" type="button" aria-label="Compensated Preview" title="Compensated Preview" aria-pressed="false">
               <img class="ico button-svg" src="/svg/view-compensated.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
@@ -527,7 +516,28 @@
             <button class="btn btn-outline reset-button" id="reset" type="button"><img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />Reset View</button>
           </div>
         </div>
-          <div class="view-tools" role="toolbar" aria-label="Pattern Tools">
+          <div id="view-edit-tools" class="view-tools view-tools-left" hidden>
+            <div id="brush-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="2D Brush Tools">
+                <button class="btn-icon" id="brush-pen" type="button" aria-label="Brush" title="Brush" aria-pressed="false"><img class="ico button-svg" src="/svg/brush.svg" alt="" aria-hidden="true" draggable="false" /></button>
+                <button class="btn-icon" id="brush-eraser" type="button" aria-label="Eraser" title="Eraser" aria-pressed="false"><img class="ico button-svg" src="/svg/eraser.svg" alt="" aria-hidden="true" draggable="false" /></button>
+              </div>
+            <div id="interactive-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="Interactive Curve Tools">
+                <button class="btn-icon" id="interactive-pin" type="button" aria-label="Pin Curve" title="Pin Curve: click to select, Alt-click to remove" aria-pressed="false">
+                  <img class="ico button-svg" src="/svg/interactive-pin.svg" alt="" aria-hidden="true" draggable="false" />
+                </button>
+                <button class="btn-icon" id="interactive-tension" type="button" aria-label="Tighten Curve" title="Tighten Curve" aria-pressed="false" disabled>
+                  <img class="ico button-svg" src="/svg/interactive-tension.svg" alt="" aria-hidden="true" draggable="false" />
+                </button>
+                <button class="btn-icon" id="interactive-slack" type="button" aria-label="Loosen Curve" title="Loosen Curve" aria-pressed="false" disabled>
+                  <img class="ico button-svg" src="/svg/interactive-slack.svg" alt="" aria-hidden="true" draggable="false" />
+                </button>
+              </div>
+            <div id="spatial-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="Spatial Brush Tools">
+                <button class="btn-icon" id="spatial-pen" type="button" aria-label="Brush" title="Brush" aria-pressed="false"><img class="ico button-svg" src="/svg/brush.svg" alt="" aria-hidden="true" draggable="false" /></button>
+                <button class="btn-icon" id="spatial-eraser" type="button" aria-label="Eraser" title="Eraser" aria-pressed="false"><img class="ico button-svg" src="/svg/eraser.svg" alt="" aria-hidden="true" draggable="false" /></button>
+              </div>
+          </div>
+          <div class="view-tools" role="toolbar" aria-label="View Tools">
             <button
               class="btn-icon"
               id="plane-toggle"
@@ -723,7 +733,7 @@
             </div>
           </div>
           <div class="calibration-actions">
-            <button class="btn btn-outline" id="calibration-points-clear" type="button">Clear Points</button>
+            <button class="btn btn-outline btn-danger" id="calibration-points-clear" type="button">Clear Points</button>
             <button class="btn btn-outline" id="calibration-download" type="button" disabled>Export Measurements</button>
           </div>
           <output id="calibration-result" aria-live="polite"></output>

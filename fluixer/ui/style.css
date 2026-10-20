@@ -258,8 +258,7 @@ canvas:active {
   overflow-wrap: anywhere;
 }
 /* === Pattern and curve editors === */
-#curve-preview,
-#brush-canvas {
+#curve-preview {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
@@ -280,15 +279,19 @@ canvas:active {
   margin: 12px 0;
 }
 #brush-fields,
+#spatial-fields,
 #step-fields,
 #image-fields {
   margin: 24px 0;
 }
-#brush-fields button[aria-pressed="true"],
-#spatial-fields button[aria-pressed="true"] {
-  background: var(--display);
-  color: var(--bg);
-  border-color: var(--display);
+#image-open,
+#image-clear,
+#step-open,
+#step-apply,
+#step-clear,
+#brush-clear,
+#spatial-clear {
+  width: 100%;
 }
 /* === Base responsive layout === */
 @media (max-width: 850px) {
@@ -347,11 +350,6 @@ canvas:active {
 }
 
 /* === Projection controls === */
-#plane-toggle[aria-pressed="true"] {
-  background: var(--display);
-  color: var(--bg);
-}
-
 .view-status.loading::before {
   content: "";
   display: block;
@@ -386,7 +384,25 @@ canvas:active {
   background: var(--glass);
   border-radius: var(--r-md);
 }
-.view-tools .btn-icon {
+.view-tools-left {
+  left: 16px;
+  right: auto;
+}
+.view-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.view-tools[hidden],
+.view-tool-group[hidden] {
+  display: none;
+}
+.view-tool-group:not([hidden]) ~ .view-tool-group:not([hidden]) {
+  border-top: 1px solid var(--line-2);
+  padding-top: 8px;
+}
+.view-tools .btn-icon,
+.playback-controls .btn-icon {
   border-radius: var(--r-sm);
   background: var(--surface);
 }
@@ -395,10 +411,13 @@ canvas:active {
   color: var(--bg);
   border-color: var(--display);
 }
-.view-tools .btn-icon:hover {
+.view-tools .btn-icon:hover:not(:disabled) {
   opacity: 0.8;
 }
-.view-tools .btn-icon:disabled {
+.view-tools .btn-icon:disabled,
+.playback-controls .btn-icon:disabled,
+.reset-button:disabled,
+#view-compensated:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -418,12 +437,6 @@ canvas:active {
 }
 .playback-controls .btn-icon {
   flex: none;
-  border-radius: var(--r-sm);
-  background: var(--surface);
-}
-.playback-controls .btn-icon:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 .playback-controls #playback-rate {
   width: 76px;
@@ -671,7 +684,6 @@ aside {
 }
 .sidebar-panel #curve-preview,
 .sidebar-panel #step-preview,
-.sidebar-panel #brush-canvas,
 .sidebar-panel #image-preview {
   display: block;
   width: auto;
@@ -790,10 +802,6 @@ aside {
 .reset-button:active:not(:disabled) {
   opacity: 0.6;
 }
-.reset-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 .sidebar-section-heading .reset-button--compact {
   flex: 0 0 16px;
   width: 16px;
@@ -823,25 +831,16 @@ aside {
 }
 
 /* CSV import preview controls. */
-#panel-output .csv-import-tools {
+#serial-controls {
   margin-top: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-@media (max-height: 760px) {
-  #panel-output .csv-import-tools {
-    margin-top: 8px;
-    padding-top: 8px;
-  }
-}
 .csv-import-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-}
-.csv-import-actions [hidden] {
-  display: none;
 }
 
 /* Preserve the layout while CSV preview temporarily locks editing. */
@@ -884,19 +883,19 @@ aside {
   gap: 0 20px;
   white-space: nowrap;
 }
-.metrics #current-output-value {
-  flex: 0 0 6ch;
-  min-width: 0;
+.metrics #current-output-value,
+.metrics #current-output-unit {
   margin: 0;
   font: inherit;
   color: inherit;
+}
+.metrics #current-output-value {
+  flex: 0 0 6ch;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
 }
 .metrics #current-output-unit {
   flex: 0 0 auto;
-  margin: 0;
-  font: inherit;
-  color: inherit;
   text-align: left;
 }
 
@@ -904,8 +903,8 @@ aside {
 
 /* Preview compensation is independent of render style and export choice. */
 #view-compensated { flex: none; border-radius: var(--r-sm); }
+#view-no-calculation[aria-pressed="true"],
 #view-compensated[aria-pressed="true"] { background: var(--display); color: var(--bg); }
-#view-compensated:disabled { opacity: 0.4; cursor: not-allowed; }
 .view-mode-divider { flex: 0 0 1px; width: 1px; height: 16px; background: var(--line); }
 .export-original { width: 100%; justify-content: space-between; margin-top: 8px; }
 
@@ -914,7 +913,7 @@ aside {
 button[aria-pressed="true"] > .button-svg { filter: invert(1); }
 
 /* === Output settings and serial controls === */
-#panel-output #export-form {
+#export-form {
   margin: 0;
   overflow: visible;
 }
@@ -924,39 +923,24 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
   margin-top: 12px;
 }
 .serial-output-actions .btn {
+  width: 100%;
   display: flex;
   justify-content: space-between;
-  align-items: center;
-}
-#panel-output #export,
-#panel-output #export-original,
-#serial-generated .btn {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 34px;
-  padding: 8px 10px;
 }
 .serial-output-actions .ico {
   width: 16px;
   height: 16px;
   flex: none;
 }
-#serial-controls .csv-import-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-#serial-controls .csv-import-actions .btn {
+.csv-import-actions .btn {
   width: 100%;
   min-width: 0;
 }
-#serial-controls #csv-preview-clear {
+#csv-preview-clear {
   grid-column: 1 / -1;
 }
 #serial-controls [hidden] {
   display: none;
-}
-#panel-output #serial-controls {
-  margin-bottom: 0;
 }
 .serial-playback {
   margin: 12px 0;
@@ -989,25 +973,32 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
 /* Compact controls do not override the shared label spacing. */
 @media (max-height: 800px) {
   #panel-output .inp,
-  #panel-output .btn,
-  #panel-output #export,
-  #panel-output #export-original,
-  #serial-generated .btn {
+  #panel-output .btn {
     min-height: 30px;
     padding: 4px 10px;
   }
-  #panel-output #export {
+  #export {
     margin-top: 10px;
   }
-  #panel-output #serial-controls {
+  #serial-controls {
     margin-top: 8px;
     padding-top: 6px;
   }
-  #panel-output .serial-output-actions {
+  .serial-output-actions {
     margin-top: 6px;
     gap: 6px;
   }
-  #panel-output .serial-playback {
+  .serial-playback {
     margin: 6px 0;
   }
 }
+
+/* Destructive actions retain the shared button shape and disabled styling. */
+.btn.btn-danger:enabled {
+  color: var(--error);
+  border-color: var(--error);
+  background: transparent;
+}
+#step-clear { margin-top: 8px; }
+
+.legend[hidden] { display: none; }
