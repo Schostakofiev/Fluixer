@@ -54,30 +54,50 @@
     }
     return points.sort((a, b) => a.y - b.y);
   }
+  const hueDistance = (a,b) => Math.min(Math.abs(a-b),180-Math.abs(a-b));
   function autoSettings(data, w, h) {
-    const samples = [], histogram = new Uint32Array(180);
-    const stride = Math.max(1, Math.floor(w * h / 120000));
-    for (let i = 0; i < w * h; i += stride) {
-      if (data[i * 4 + 3] < 128) continue;
-      const [hue, saturation, value] = hsv(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]);
-      // Yellow liquid is the measured material; ignore neutral cylinder/background pixels.
-      if (hue >= 18 && hue <= 40 && saturation >= 70 && value >= 60) {
-        samples.push([hue, saturation, value]); histogram[Math.round(hue)]++;
-      }
+    // Search every hue; neutral pipe/background pixels do not vote for a color.
+    const samples=[], histogram=new Uint32Array(180);
+    const stride=Math.max(1,Math.floor(w*h/120000));
+    for(let i=0;i<w*h;i+=stride){
+      if(data[i*4+3]<128)continue;
+      const pixel=hsv(data[i*4],data[i*4+1],data[i*4+2]);
+      if(pixel[1]>=40 && pixel[2]>=30){samples.push(pixel);histogram[Math.round(pixel[0])%180]++;}
     }
-    if (samples.length < 12) return { ...defaults };
-    let peak = 29;
-    for (let h = 18; h <= 40; h++) if (histogram[h] > histogram[peak]) peak = h;
-    const selected = samples.filter(p => Math.abs(p[0] - peak) <= 3);
-    const quantile = (index, fraction) => {
-      const values = selected.map(p => p[index]).sort((a, b) => a - b);
-      return values[Math.floor((values.length - 1) * fraction)];
-    };
-    const base = { hLow: Math.max(0, peak - 3), hHigh: Math.min(179, peak + 3),
-      sLow: Math.round(quantile(1, .2) * .9), vLow: Math.round(quantile(2, .6) * .96),
-      minArea: Math.max(9, Math.round(w * h * .00002)), closeK: 0 };
-    const regions = detect(data, w, h, base).filter(p => p.x - p.left >= (p.bottom - p.top) * 1.5);
-    if (regions.length >= 2) base.minArea = Math.max(9, Math.min(3000, Math.round(median(regions.map(p => p.area)) * .2)));
+    if(samples.length<12)return {...defaults};
+    const scores=Array.from({length:180},(_,h)=>{
+      let sum=0;for(let d=-3;d<=3;d++)sum+=histogram[(h+d+180)%180];
+      return sum;
+    });
+    const peaks=[];
+    for(const h of Array.from({length:180},(_,i)=>i).sort((a,b)=>scores[b]-scores[a]||histogram[b]-histogram[a])){
+      if(scores[h]<12 || peaks.some(p=>hueDistance(p,h)<14))continue;
+      peaks.push(h);if(peaks.length===8)break;
+    }
+    // Evaluate repeated horizontal components on a small image so a large colored
+    // background does not automatically win over the liquid color.
+    const ratio=Math.min(1,400/Math.max(w,h)),sw=Math.max(1,Math.round(w*ratio)),sh=Math.max(1,Math.round(h*ratio));
+    const reduced=new Uint8ClampedArray(sw*sh*4);
+    for(let y=0;y<sh;y++)for(let x=0;x<sw;x++){
+      const src=(Math.min(h-1,Math.floor(y/ratio))*w+Math.min(w-1,Math.floor(x/ratio)))*4;
+      reduced.set(data.subarray(src,src+4),(y*sw+x)*4);
+    }
+    let best=null;
+    for(const peak of peaks){
+      const selected=samples.filter(p=>hueDistance(p[0],peak)<=6);
+      const quantile=(index,fraction)=>{const values=selected.map(p=>p[index]).sort((a,b)=>a-b);return values[Math.floor((values.length-1)*fraction)];};
+      const base={...defaults,hCenter:peak,hRadius:6,
+        sLow:Math.max(30,Math.round(quantile(1,.2)*.7)),vLow:Math.max(20,Math.round(quantile(2,.2)*.7)),
+        minArea:Math.max(9,Math.round(w*h*.00002)),closeK:0};
+      const rows=detect(reduced,sw,sh,{...base,minArea:Math.max(6,Math.round(base.minArea*ratio*ratio))})
+        .filter(p=>p.x-p.left>=(p.bottom-p.top+1)*1.5 && p.bottom-p.top<sh*.15 && p.area<sw*sh*.15);
+      const spread=rows.length>1?(rows.at(-1).y-rows[0].y)/sh:0;
+      const score=(rows.length>=2 ? 1000+rows.length*20+spread*100 : 0)+scores[peak]/samples.length;
+      if(!best||score>best.score)best={base,score};
+    }
+    const base=best?.base||{...defaults};
+    const rows=detect(data,w,h,base).filter(p=>p.x-p.left>=(p.bottom-p.top+1)*1.5 && p.bottom-p.top<h*.15 && p.area<w*h*.15);
+    if(rows.length>=2)base.minArea=Math.max(9,Math.min(3000,Math.round(median(rows.map(p=>p.area))*.2)));
     return base;
   }
   // Sample original image pixels, never the endpoint/scale overlays.
@@ -104,41 +124,12 @@
   }
   const median = a => { const b = [...a].sort((x, y) => x - y); return b.length % 2 ? b[(b.length - 1) / 2] : (b[b.length / 2 - 1] + b[b.length / 2]) / 2; };
 
-  // Look above the liquid: exposed cylinder edges, not the tube's outer diameter.
-  // A stable bright cylinder against a darker background is required; no guessed scale.
-  function cylinderScale(data, w, h, points) {
-    if (points.length < 2) throw Error('Mark at least two endpoints or adjust the thresholds');
-    const top = Math.min(...points.map(p => p.y));
-    const leftPoint = Math.min(...points.map(p => p.left ?? p.x)), rightPoint = Math.max(...points.map(p => p.x));
-    const center = (leftPoint + rightPoint) / 2;
-    const gray = (x, y) => { const i = (y * w + x) * 4; return .2126 * data[i] + .7152 * data[i + 1] + .0722 * data[i + 2]; };
-    const rows = [], pad = Math.max(2, Math.round(w / 400));
-    const begin = Math.max(pad, Math.floor(top - h * .28)), end = Math.max(begin, Math.floor(top - h * .07));
-    for (let y = begin; y < end; y += Math.max(1, Math.round(h / 350))) {
-      if (gray(Math.round(center), y) < 65) continue;
-      let l = -1, r = -1, lg = 0, rg = 0;
-      for (let x = pad; x < Math.min(leftPoint - pad, center - w * .05); x++) {
-        const delta = gray(x + pad, y) - gray(x - pad, y);
-        if (delta > lg) { lg = delta; l = x; }
-      }
-      for (let x = Math.max(Math.ceil(rightPoint + pad), Math.ceil(center + w * .05)); x < w - pad; x++) {
-        const delta = gray(x - pad, y) - gray(x + pad, y);
-        if (delta > rg) { rg = delta; r = x; }
-      }
-      if (lg >= 18 && rg >= 25 && r - l >= w * .15 && r - l <= w * .9 && l > pad && r < w - pad - 1) rows.push({ l, r, y });
-    }
-    if (rows.length < 6) throw Error('80 mm cylinder edges not found. Use a front-facing photo with both exposed edges visible');
-    // The first stable side-wall band avoids the curved top rim and later tubing.
-    let stable = [];
-    for (const candidate of rows) {
-      const tolerance = Math.max(3, (candidate.r - candidate.l) * .02);
-      const band = rows.filter(r => r.y >= candidate.y && r.y <= candidate.y + h * .04);
-      const consistent = band.filter(r => Math.abs(r.l - candidate.l) <= tolerance && Math.abs(r.r - candidate.r) <= tolerance);
-      if (consistent.length >= 6 && consistent.length >= band.length * .45 && consistent[consistent.length - 1].y - consistent[0].y >= h * .012) { stable = consistent; break; }
-    }
-    if (!stable.length) throw Error('Cylinder boundary is ambiguous. Use a clearer, front-facing photo');
-    const l = median(stable.map(r => r.l)), r = median(stable.map(r => r.r));
-    return { left: l, right: r, y: median(stable.map(r => r.y)), mmPerPixel: 80 / (r - l), support: stable.length };
+  function referenceScale(points) {
+    if (!Array.isArray(points) || points.length !== 2) throw Error('Calibrate 80 mm by selecting two points in the photo');
+    if (points.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y))) throw Error('Invalid scale points');
+    const pixels=Math.hypot(points[1].x-points[0].x,points[1].y-points[0].y);
+    if(pixels<2)throw Error('Select two distinct points for the 80 mm reference');
+    return {pixels,mmPerPixel:80/pixels};
   }
 
   function slopes(xs, ys) {
@@ -183,7 +174,7 @@
       curve: { interpolation: 'pchip', amplitude: amplitude || 1, x: pts.map(p => (p.y - pts[0].y) / (pts[pts.length - 1].y - pts[0].y)), y: offsets.map(v => amplitude ? v / amplitude : 0) },
     };
   }
-  const api = { defaults, pickedSettings, autoSettings, adjustedSettings, hsv, detect, cylinderScale, measurement, slopes, interpolate };
+  const api = { defaults, pickedSettings, autoSettings, adjustedSettings, hsv, detect, referenceScale, measurement, slopes, interpolate };
   if (typeof module !== 'undefined') module.exports = api;
   else root.FluixerCalibration = api;
 })(typeof window === 'undefined' ? {} : window);
@@ -192,8 +183,9 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
   const api = window.FluixerCalibration, $ = id => document.getElementById('calibration-' + id);
   const dialog = $('dialog'), canvas = $('photo'), ctx = canvas.getContext('2d');
   const keys = ['sensitivity', 'noise'];
-  let baseSettings = { ...api.defaults }, picking = false;
+  let baseSettings = { ...api.defaults }, picking = false, scalePicking = false, scaleDraft = [], scalePoints = [];
   function setPicking(value) {
+    if(value)setScalePicking(false);
     picking = value;
     $('pick-color').textContent = value ? 'Cancel Pick' : 'Pick Color';
     $('pick-color').setAttribute('aria-pressed', String(value));
@@ -201,11 +193,24 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     $('pick-color').classList.toggle('btn-outline', !value);
     canvas.style.cursor = value ? 'crosshair' : '';
   }
+  function setScalePicking(value) {
+    if(value)setPicking(false);
+    scalePicking=value;scaleDraft=[];
+    $('scale-pick').textContent=value?'Select First Point':'Calibrate 80 mm';
+    $('scale-pick').setAttribute('aria-pressed',String(value));
+    $('scale-pick').classList.toggle('btn-primary',value);
+    $('scale-pick').classList.toggle('btn-outline',!value);
+    canvas.style.cursor=value?'crosshair':'';
+  }
+  $('scale-pick').addEventListener('click',()=>{
+    if(locked()||reading||!photo)return;
+    setScalePicking(!scalePicking);paint();
+  });
   $('pick-color').addEventListener('click', () => {
     if (locked() || reading || !photo) return;
     setPicking(!picking);
   });
-  dialog.addEventListener('close', () => setPicking(false));
+  dialog.addEventListener('close', () => {setPicking(false);setScalePicking(false);});
   let photo = null, automatic = [], manual = [], scale = null, result = null, timer = null, readId = 0, reading = false;
   function resetParameters() {
     for (const id of keys) {
@@ -227,10 +232,12 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     ctx.putImageData(photo, 0, 0);
     const line = Math.max(1, photo.width / 500);
     ctx.lineWidth = line;
-    if (scale) {
-      ctx.strokeStyle = '#329962';
-      ctx.beginPath(); ctx.moveTo(scale.left, scale.y); ctx.lineTo(scale.right, scale.y); ctx.stroke();
-      for (const x of [scale.left, scale.right]) { ctx.beginPath(); ctx.moveTo(x, scale.y - 12); ctx.lineTo(x, scale.y + 12); ctx.stroke(); }
+    const reference=scalePicking&&scaleDraft.length?scaleDraft:scalePoints;
+    if(reference.length){
+      ctx.strokeStyle='#329962';ctx.fillStyle='#329962';ctx.beginPath();ctx.moveTo(reference[0].x,reference[0].y);
+      if(reference.length===2)ctx.lineTo(reference[1].x,reference[1].y);
+      ctx.stroke();
+      for(const p of reference){ctx.beginPath();ctx.arc(p.x,p.y,line*3,0,Math.PI*2);ctx.fill();}
     }
     if (result) {
       ctx.strokeStyle = '#2488cc'; ctx.setLineDash([line * 4, line * 4]);
@@ -248,9 +255,9 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     try {
       automatic = api.detect(photo.data, photo.width, photo.height, settings());
       const selected = points();
-      scale = api.cylinderScale(photo.data, photo.width, photo.height, selected);
+      scale = api.referenceScale(scalePoints);
       result = api.measurement(selected, scale.mmPerPixel);
-      $('result').textContent = `${selected.length} points · 80 mm / ${(scale.right - scale.left).toFixed(1)} px · ±${result.curve.amplitude.toFixed(2)} mm`;
+      $('result').textContent = `${selected.length} points · 80 mm / ${scale.pixels.toFixed(1)} px · ±${result.curve.amplitude.toFixed(2)} mm`;
       $('apply').disabled = locked(); $('download').disabled = locked();
     } catch (error) { $('error').textContent = error.message; }
     paint();
@@ -270,7 +277,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     const file = $('file').files[0]; $('file').value = '';
     if (!file || locked()) return;
     const token = ++readId; reading = true; clearTimeout(timer); photo = null; automatic = []; manual = []; scale = null; result = null;
-    setPicking(false); $('pick-color').disabled = true;
+    setPicking(false);setScalePicking(false);scalePoints=[];$('scale-pick').disabled=true; $('pick-color').disabled = true;
     canvas.hidden = true; $('apply').disabled = true; $('download').disabled = true;
     $('result').textContent = ''; $('error').textContent = '';
     const url = URL.createObjectURL(file);
@@ -285,7 +292,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
       photo = g.getImageData(0, 0, buffer.width, buffer.height);
       baseSettings = api.autoSettings(photo.data, photo.width, photo.height);
       resetParameters();
-      $('mode').value = 'auto'; canvas.hidden = false; reading = false; $('pick-color').disabled = false; refresh();
+      $('mode').value = 'auto'; canvas.hidden = false; reading = false; $('pick-color').disabled = false; $('scale-pick').disabled=false; refresh();
     } catch (error) { if (token === readId) $('error').textContent = error.message || 'Could not decode photo'; }
     finally { URL.revokeObjectURL(url); if (token === readId) reading = false; }
   });
@@ -303,6 +310,13 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
   canvas.addEventListener('click', event => {
     if (locked() || reading || !photo) return;
     const r = canvas.getBoundingClientRect(), x = (event.clientX - r.left) / r.width * photo.width, y = (event.clientY - r.top) / r.height * photo.height;
+    if(scalePicking){
+      if(scaleDraft.length===0){scaleDraft=[{x,y}];$('scale-pick').textContent='Select Second Point';paint();return;}
+      const pair=[scaleDraft[0],{x,y}];
+      try {api.referenceScale(pair);scalePoints=pair;setScalePicking(false);refresh();}
+      catch(error){$('error').textContent=error.message;}
+      return;
+    }
     if (picking) {
       try {
         baseSettings = api.pickedSettings(photo.data, photo.width, photo.height, x, y, baseSettings);
@@ -333,7 +347,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
   });
   // The photo dialog owns a separate undo stack; applying a curve is one main-project edit.
   function capturePhotoEdit() {
-    return { photo, baseSettings: { ...baseSettings }, manual: structuredClone(manual),
+    return { photo, baseSettings: { ...baseSettings }, manual: structuredClone(manual), scalePoints: structuredClone(scalePoints),
       mode: $('mode').value, values: keys.map(id => $(id).value) };
   }
   const photoHistory = new FluixerHistory.History({
@@ -341,10 +355,10 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     equal: (a, b) => a.photo === b.photo && JSON.stringify({ ...a, photo: null }) === JSON.stringify({ ...b, photo: null }),
     restore: state => {
       ++readId; reading = false; clearTimeout(timer);
-      photo = state.photo; baseSettings = { ...state.baseSettings }; manual = structuredClone(state.manual);
+      photo = state.photo; baseSettings = { ...state.baseSettings }; manual = structuredClone(state.manual);scalePoints=structuredClone(state.scalePoints);setScalePicking(false);
       $('mode').value = state.mode;
       keys.forEach((id, index) => { $(id).value = state.values[index]; $(id + '-slider').value = state.values[index]; syncSlider($(id + '-slider')); });
-      setPicking(false); $('pick-color').disabled = !photo;
+      setPicking(false); $('pick-color').disabled = !photo; $('scale-pick').disabled=!photo;
       canvas.hidden = !photo; refresh();
     },
   });

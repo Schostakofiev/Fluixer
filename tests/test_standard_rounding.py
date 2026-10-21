@@ -30,10 +30,10 @@ class StandardRoundingTests(unittest.TestCase):
             for wind in [4,16,32]:
                 for k,pre_add,distance in [(606,730,9.65),(625,0,9.65),(700.9,123.45,12.3)]:
                     with self.subTest(kind=kind,wind=wind,k=k):
-                        tube={'type':kind,'radius':40,'height':75,'diameter':4,'wind':wind}
-                        payload={'cylinder':tube,'k_gas':k,'pre_add':pre_add,'length_per_100_steps':distance}
+                        pipe={'type':kind,'radius':40,'height':75,'diameter':4,'wind':wind}
+                        payload={'cylinder':pipe,'k_gas':k,'pre_add':pre_add,'length_per_100_steps':distance}
                         actual,step,_=self.reconstructed(payload)
-                        ideal=row_centers(cylinder_settings(tube))
+                        ideal=row_centers(cylinder_settings(pipe))
                         self.assertEqual(len(actual),len(ideal))
                         self.assertLessEqual(max(abs(a-b) for a,b in zip(actual,ideal)),step/2+1e-8)
 
@@ -41,15 +41,15 @@ class StandardRoundingTests(unittest.TestCase):
         from fluixer.compensation import curve_settings
         curve={'amplitude':5,'x':[0,1/3,2/3,1],'y':[-.3,.8,-.4,.2]}
         for kind in ['cylinder','s-curve']:
-            tube={'type':kind,'radius':40,'height':75,'diameter':4,'wind':16}
-            actual,step,_=self.reconstructed({'cylinder':tube,'compensation':curve})
-            ideal=row_centers(cylinder_settings(tube),curve_settings(curve))
+            pipe={'type':kind,'radius':40,'height':75,'diameter':4,'wind':16}
+            actual,step,_=self.reconstructed({'cylinder':pipe,'compensation':curve})
+            ideal=row_centers(cylinder_settings(pipe),curve_settings(curve))
             self.assertLessEqual(max(abs(a-b) for a,b in zip(actual,ideal)),step/2+1e-8)
 
     def test_total_gas_budget_is_rounded_once(self):
-        tube={'type':'s-curve','radius':40,'height':75,'diameter':4,'wind':16}
-        centers=row_centers(cylinder_settings(tube))
-        _,_,rows=self.reconstructed({'cylinder':tube})
+        pipe={'type':'s-curve','radius':40,'height':75,'diameter':4,'wind':16}
+        centers=row_centers(cylinder_settings(pipe))
+        _,_,rows=self.reconstructed({'cylinder':pipe})
         expected=round(((centers[-1]+730)/.0965-100*(len(centers)-.5))*606/625)
         self.assertEqual(sum(row[3] for row in rows if row[1]=='g'),expected)
 

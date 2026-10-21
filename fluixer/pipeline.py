@@ -1,11 +1,11 @@
-"""Along-path simulation for generated and imported tube paths.
+"""Along-path simulation for generated and imported pipe paths.
 
 No machine parameters or export units enter the simulation result.
 """
 from dataclasses import dataclass, replace
 from .cubic import CubicPath, cylinder_spiral
 
-from .geometry import finite, s_curve, hilbert_curve, TubePath
+from .geometry import finite, s_curve, hilbert_curve, PipePath
 
 from .segments import PhysicalSequence
 
@@ -34,20 +34,20 @@ class CylinderSettings:
 
 def cylinder_settings(value=None):
     if value is None:return CylinderSettings()
-    if not isinstance(value,dict) or not {'radius','diameter','height','wind'}<=set(value) or set(value)-{'radius','diameter','height','wind','type','mapping','placement','source','reverse','center','initial_placement','points','target_length','avoid_collisions','pins','stiffness'}:raise ValueError('Incomplete tube parameters')
+    if not isinstance(value,dict) or not {'radius','diameter','height','wind'}<=set(value) or set(value)-{'radius','diameter','height','wind','type','mapping','placement','source','reverse','center','initial_placement','points','target_length','avoid_collisions','pins','stiffness'}:raise ValueError('Incomplete pipe parameters')
     radius,diameter,height,wind=(finite(value[n],n) for n in ('radius','diameter','height','wind'))
     if not 1<=radius<=500 or not .1<=diameter<=100 or not 1<=height<=1000 or wind!=int(wind) or not 1<=wind<=64:
         raise ValueError('Radius: 1–500 mm; diameter: 0.1–100 mm; height: 1–1000 mm; windings: integer 1–64')
     kind=value.get('type','cylinder')
-    if kind not in ('cylinder','s-curve','hilbert','custom-step','interactive'):raise ValueError('Unsupported tube type')
+    if kind not in ('cylinder','s-curve','hilbert','custom-step','interactive'):raise ValueError('Unsupported pipe type')
     mapping=value.get('mapping','projection')
     if mapping!='projection':raise ValueError('Invalid mapping method')
     if kind=='hilbert' and wind>6:raise ValueError('Hilbert order must be between 1 and 6')
     source=value.get('source');reverse=value.get('reverse',False)
-    if not isinstance(reverse,bool):raise ValueError('Invalid tube direction')
+    if not isinstance(reverse,bool):raise ValueError('Invalid pipe direction')
     if kind=='custom-step':
         if not isinstance(source,str) or not source or len(source.encode('utf-8'))>2097152:raise ValueError('Choose a STEP centerline up to 2 MB')
-    elif source is not None or reverse:raise ValueError('This tube type does not accept STEP centerlines')
+    elif source is not None or reverse:raise ValueError('This pipe type does not accept STEP centerlines')
     points=None
     target_length=None
     avoid_collisions=True
@@ -69,12 +69,12 @@ def cylinder_settings(value=None):
         if isinstance(value.get('stiffness'),bool):raise ValueError('Invalid Interactive stiffness')
         stiffness=finite(value.get('stiffness',.2),'stiffness')
         if not 0<=stiffness<=1:raise ValueError('Stiffness must be between 0 and 1')
-    elif any(k in value for k in ('points','target_length','avoid_collisions','pins','stiffness')):raise ValueError('This tube type does not accept editable points')
+    elif any(k in value for k in ('points','target_length','avoid_collisions','pins','stiffness')):raise ValueError('This pipe type does not accept editable points')
     center=value.get('center')
     if center is not None:
-        if not isinstance(center,(list,tuple)) or len(center)!=3:raise ValueError('Tube center must be a 3D coordinate')
+        if not isinstance(center,(list,tuple)) or len(center)!=3:raise ValueError('Pipe center must be a 3D coordinate')
         center=tuple(finite(v,'center') for v in center)
-        if any(abs(v)>1e6 for v in center):raise ValueError('Tube center is out of range')
+        if any(abs(v)>1e6 for v in center):raise ValueError('Pipe center is out of range')
     from .projection import settings
     placement=settings(value.get('placement'))
     return CylinderSettings(radius,diameter,height,int(wind),type=kind,mapping=mapping,placement=placement,source=source,reverse=reverse,center=center,initial_placement=settings(value.get('initial_placement')),points=points,target_length=target_length,avoid_collisions=avoid_collisions,pins=pins,stiffness=stiffness)
@@ -95,14 +95,14 @@ def cylinder_config(cylinder):
     if cylinder.center is not None:result['center']=cylinder.center
     return result
 
-def raw_tube_path(c):
+def raw_pipe_path(c):
     if c.type=='interactive':
         from .interactive import interactive_path,check_constraints
         path=interactive_path(c.points)
         check_constraints(path,c.diameter,c.target_length,c.avoid_collisions)
         return path
     if c.type=='custom-step':
-        from .tube_step import step_path
+        from .pipe_step import step_path
         return step_path(c.source,c.reverse)
     if c.type=='hilbert':return hilbert_curve(width=2*c.radius,height=c.height,order=c.wind)
     if c.type=='s-curve':return s_curve(width=2*c.radius,height=c.height/2,wind=c.wind)
@@ -126,8 +126,8 @@ def path_bounds(path):
     return tuple(tuple(f(p[i] for p in points) for i in range(3)) for f in (min,max))
 
 
-def tube_path(c):
-    path=raw_tube_path(c)
+def pipe_path(c):
+    path=raw_pipe_path(c)
     if c.center is None:return path
     from .cubic import CubicSpan
     from .geometry import Line
@@ -143,7 +143,7 @@ def tube_path(c):
 
 @dataclass(frozen=True)
 class SolvedDisplay:
-    path: CubicPath | TubePath
+    path: CubicPath | PipePath
     sequence: PhysicalSequence
     pattern_id: str
 
@@ -165,7 +165,7 @@ def pattern_frame(cylinder):
 
 def simulate_along_path(pattern,curve,cylinder):
     from .path_partition import region_for,along_path
-    path=tube_path(cylinder)
+    path=pipe_path(cylinder)
     if pattern and pattern[0]=='spatial-brush':
         from .segments import partition_path
         from .spatial_brush import merge_short_segments

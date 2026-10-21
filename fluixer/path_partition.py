@@ -87,10 +87,10 @@ def region_for(pattern,c):
     raise ValueError('Unsupported pattern type')
 
 def compensation_transform(height_range,curve,projection=None):
-    """Sample top-to-bottom tube height, correcting model X before projection.
+    """Sample top-to-bottom pipe height, correcting model X before projection.
 
-    The physical tube's projection depth stays unchanged: compensation moves the
-    pattern membership query, not the tube or the projection's clipping planes.
+    The physical pipe's projection depth stays unchanged: compensation moves the
+    pattern membership query, not the pipe or the projection's clipping planes.
     """
     amp,cx,cy=curve[:3]
     offsets=[amp*curve_value(1-i/256,curve) for i in range(257)] if amp and any(cy) else [0]*257
@@ -115,7 +115,7 @@ def along_path(path,region,*,height_range,curve,front_y=None,projection=None,bac
     def segment(sa,sb,a,b,depth=0):
         nonlocal samples
         samples+=1
-        if samples>MAX_SAMPLES:raise ValueError('Along-path calculation is too complex. Reduce tube count or dimensions')
+        if samples>MAX_SAMPLES:raise ValueError('Along-path calculation is too complex. Reduce pipe count or dimensions')
         mid=(sa+sb)/2;m=transform(path.point_at_distance(mid))
         errors=[math.dist(m,lerp(a,b,.5))]
         for t in (.25,.75):errors.append(math.dist(transform(path.point_at_distance(sa+(sb-sa)*t)),lerp(a,b,t)))

@@ -6,13 +6,13 @@ deflection; simulation/export lengths refer to that polyline approximation.
 from functools import lru_cache
 import math
 from .step_input import kernel, step_file, MAX_BYTES
-from .geometry import Line, TubePath
+from .geometry import Line, PipePath
 
 G0_TOLERANCE = 1e-5
 DEFLECTION = .005
 
 @lru_cache(maxsize=4)
-def parse_tube_step(source):
+def parse_pipe_step(source):
     if not isinstance(source,str) or len(source.encode('utf-8'))>MAX_BYTES:
         raise ValueError('STEP files must not exceed 2 MB')
     if not source.lstrip().startswith('ISO-10303-21;') or 'END-ISO-10303-21;' not in source:
@@ -43,7 +43,7 @@ def _read(source):
         if reader.TransferRoots()<1:raise ValueError('No readable curves in the STEP file')
         shape=reader.OneShape()
     if shape.IsNull() or not BRepCheck_Analyzer(shape).IsValid():raise ValueError('Invalid STEP topology')
-    if TopExp_Explorer(shape,TopAbs_FACE).More():raise ValueError('Export the tube centerline; surfaces and solids are not supported')
+    if TopExp_Explorer(shape,TopAbs_FACE).More():raise ValueError('Export the pipe centerline; surfaces and solids are not supported')
     edges=TopTools_IndexedMapOfShape();TopExp.MapShapes_s(shape,TopAbs_EDGE,edges)
     if not 1<=edges.Extent()<=2048:raise ValueError('STEP must contain 1–2048 centerline edges')
     nodes=[];adj=[];runs=[];total=0
@@ -85,6 +85,6 @@ def _read(source):
                 edge_count=len(runs),g0_tolerance=G0_TOLERANCE,deflection=DEFLECTION)
 
 def step_path(source,reverse=False):
-    points=parse_tube_step(source)['points']
+    points=parse_pipe_step(source)['points']
     if reverse:points=tuple(reversed(points))
-    return TubePath(tuple(Line(a,b) for a,b in zip(points,points[1:])), 'mm')
+    return PipePath(tuple(Line(a,b) for a,b in zip(points,points[1:])), 'mm')

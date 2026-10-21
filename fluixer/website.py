@@ -76,7 +76,7 @@ def create_app(config=None):
 
     @app.get('/<path:asset>')
     def asset(asset):
-        allowed = asset in {'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'tube-renderer.js', 'style.css'}
+        allowed = asset in {'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'pipe-renderer.js', 'style.css'}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('svg/*.svg')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}
@@ -86,7 +86,7 @@ def create_app(config=None):
 
     @app.route('/api/<operation>', methods=['GET', 'POST'])
     def api(operation):
-        if operation not in {'display', 'export', 'calibration-standard', 'image', 'step', 'tube-step'}:
+        if operation not in {'display', 'export', 'calibration-standard', 'image', 'step', 'pipe-step', 'print-preview', 'print-step'}:
             return jsonify(error='Endpoint not found'), 404
         if request.method == 'GET' and operation != 'display':
             return jsonify(error='Use POST for this endpoint'), 405
@@ -109,6 +109,14 @@ def create_app(config=None):
                 data = request.get_json()
             if not isinstance(data, dict):
                 raise ValueError('Request body must be a JSON object')
+            if operation == 'print-step':
+                from .print_preview import print_step_payload
+                with _lock:body=print_step_payload(data)
+                return Response(body,content_type='application/step',headers={'Content-Disposition':'attachment; filename="fluixer-print.step"'})
+            if operation == 'print-preview':
+                from .print_preview import print_payload
+                with _lock:result=print_payload(data)
+                return jsonify(result)
             if operation == 'calibration-standard':
                 from .standard_leveling import standard_csv_payload
                 with _lock:
@@ -128,9 +136,9 @@ def create_app(config=None):
                 from .image_input import photo_subject
                 return jsonify(photo_subject(data['source']))
             from .step_input import parse_step
-            from .tube_step import parse_tube_step
+            from .pipe_step import parse_pipe_step
             with _lock:
-                return jsonify({'step': parse_step, 'tube-step': parse_tube_step}[operation](data['source']))
+                return jsonify({'step': parse_step, 'pipe-step': parse_pipe_step}[operation](data['source']))
         except (ValueError, TypeError, OverflowError) as error:
             return jsonify(error=str(error)), 400
         except HTTPException:

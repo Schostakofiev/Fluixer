@@ -1,19 +1,19 @@
 import math
 import unittest
-from fluixer.pipeline import cylinder_settings, cylinder_config, tube_path
+from fluixer.pipeline import cylinder_settings, cylinder_config, pipe_path
 from fluixer.webapp import preview, csv_payload
 from fluixer.interactive import validate_points
 
 class InteractiveTests(unittest.TestCase):
-    def tube(self, points):
+    def pipe(self, points):
         return cylinder_settings(dict(type='interactive',radius=40,height=75,diameter=4,wind=16,points=points))
     def test_straight_and_roundtrip(self):
-        c=self.tube([[i*2.5,0,37.5] for i in range(33)])
-        self.assertAlmostEqual(tube_path(c).length,80)
+        c=self.pipe([[i*2.5,0,37.5] for i in range(33)])
+        self.assertAlmostEqual(pipe_path(c).length,80)
         self.assertEqual(cylinder_settings(cylinder_config(c)),c)
     def test_spatial_curve_preview_export(self):
-        c=self.tube([[i*2.5,8*math.sin(i/32*math.pi),37.5+12*math.sin(i/32*math.pi)] for i in range(33)])
-        path=tube_path(c)
+        c=self.pipe([[i*2.5,8*math.sin(i/32*math.pi),37.5+12*math.sin(i/32*math.pi)] for i in range(33)])
+        path=pipe_path(c)
         self.assertGreater(path.length,80)
         for a,b in zip(path.pieces,path.pieces[1:]):
             for x,y in zip(a.point_at(1),b.point_at(0)):self.assertAlmostEqual(x,y)

@@ -53,7 +53,7 @@ def check_constraints(path,diameter,target_length=None,avoid_collisions=True):
         raise ValueError('Interactive curve no longer matches its locked length')
     if not avoid_collisions:return
     # Capsule contact tolerance matches the browser solver. Curvature is not a
-    # collision constraint; only non-neighbouring tube portions are obstacles.
+    # collision constraint; only non-neighbouring pipe portions are obstacles.
     tolerance=min(.02,diameter*.002)
     segments=[]
     along=0.
@@ -93,4 +93,4 @@ def check_constraints(path,diameter,target_length=None,avoid_collisions=True):
             if other_start-end<gap:continue
             if any(lo[k]-other_hi[k]>clearance or other_lo[k]-hi[k]>clearance for k in range(3)):continue
             if segment_distance(a,b,c,d)<clearance:
-                raise ValueError('Interactive tube overlaps itself at this outer diameter')
+                raise ValueError('Interactive pipe overlaps itself at this outer diameter')

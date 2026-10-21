@@ -4,7 +4,7 @@ The input is explicit liquid windows in true distance along the path. The GH
 contour/Brep-to-window solver is not replaced by this module.
 """
 from dataclasses import dataclass
-from .geometry import TubePath, finite
+from .geometry import PipePath, finite
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class PhysicalSequence:
     segments: tuple[PhysicalSegment, ...]
 
 
-def partition_path(path: TubePath, liquid_windows):
+def partition_path(path: PipePath, liquid_windows):
     """Partition a path into gas/liquid, merging touching or overlapping windows.
 
     Windows must be ordered endpoints in [0, path.length]. Input order may vary.

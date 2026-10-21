@@ -8,7 +8,7 @@ let src=fs.readFileSync(require('node:path').join(__dirname,'../fluixer/ui/visua
 const end=src.lastIndexOf('};');src=src.slice(0,end)+`window.photoTest={history:photoHistory,capture:capturePhotoEdit,refresh,setPhoto:p=>{photo=p;},};\n`+src.slice(end);
 vm.runInContext(src,c);
 const api=c.window.FluixerCalibration;
-api.detect=()=>[{x:2,y:2},{x:3,y:8}];api.cylinderScale=()=>({left:0,right:80,y:5,mmPerPixel:1});api.measurement=pts=>({center:2,curve:{amplitude:1},rows:pts});
+api.detect=()=>[{x:2,y:2},{x:3,y:8}];api.referenceScale=()=>({pixels:80,mmPerPixel:1});api.measurement=pts=>({center:2,curve:{amplitude:1},rows:pts});
 api.init({locked:()=>false,syncSlider(){},apply(){}});
 const t=c.window.photoTest;node('calibration-mode').value='manual';t.setPhoto({width:100,height:100,data:[]});t.refresh();t.history.reset();
 const click=node('calibration-photo').handlers.click[0];click({clientX:30,clientY:40});
@@ -18,3 +18,9 @@ t.history.begin();node('calibration-sensitivity').value='60';t.refresh();node('c
 assert.equal(t.history.undo.length,2);t.history.move();assert.equal(node('calibration-sensitivity').value,'50');
 let prevented=false;node('calibration-dialog').handlers.keydown[0]({key:'z',ctrlKey:true,target:{closest:()=>null},preventDefault(){prevented=true},stopPropagation(){}});assert(prevented);assert.equal(t.capture().manual.length,0);
 console.log('PASS: photo marker undo/redo, slider grouping, isolated shortcut handling.');
+const {referenceScale}=require('../fluixer/ui/visual-calibration.js');
+assert.equal(referenceScale([{x:0,y:0},{x:60,y:80}]).mmPerPixel,.8);
+assert.equal(referenceScale([{x:220,y:10},{x:20,y:10}]).mmPerPixel,.4);
+assert.throws(()=>referenceScale([]));
+assert.throws(()=>referenceScale([{x:5,y:5},{x:5,y:5}]));
+console.log('PASS: 80mm two-point Euclidean scale, reversed endpoints and invalid reference rejection.');

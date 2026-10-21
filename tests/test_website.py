@@ -14,15 +14,8 @@ class WebsiteTests(unittest.TestCase):
         self.client=self.app.test_client()
         self.base='https://fluixer.example'
         self.headers={'Authorization':'Basic '+base64.b64encode(b'guest:test-password-for-ci-only').decode(),'Origin':self.base}
-    def test_geometry_only_preview(self):
-        with patch('fluixer.webapp.pattern_key', side_effect=AssertionError('pattern calculation called')):
-            response=self.client.post('/api/display',base_url=self.base,headers=self.headers,json={
-                'geometry_only':True,'cylinder':dict(radius=40,diameter=4,height=75,wind=16)})
-        self.assertEqual(response.status_code,200)
-        self.assertTrue(response.json['geometry_only'])
-
     def test_auth(self):
-        for path in ['/','/app.js','/api/display','/api/image','/api/export','/api/step','/api/tube-step']:
+        for path in ['/','/app.js','/api/display','/api/image','/api/export','/api/step','/api/pipe-step']:
             r=self.client.get(path,base_url=self.base)
             self.assertEqual(r.status_code,401)
             self.assertIn('Basic',r.headers['WWW-Authenticate'])
@@ -89,7 +82,7 @@ class WebsiteTests(unittest.TestCase):
 
     def test_step_routes_without_svg_parser(self):
         for endpoint, parser in [('step', 'fluixer.step_input.parse_step'),
-                                 ('tube-step', 'fluixer.tube_step.parse_tube_step')]:
+                                 ('pipe-step', 'fluixer.pipe_step.parse_pipe_step')]:
             with patch(parser, return_value={'parsed': endpoint}) as parse:
                 response = self.client.post('/api/' + endpoint, base_url=self.base,
                     headers=self.headers, json={'source': 'step fixture'})

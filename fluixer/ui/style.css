@@ -281,9 +281,12 @@ canvas:active {
 #brush-fields,
 #spatial-fields,
 #step-fields,
+#pipe-step-fields,
 #image-fields {
   margin: 24px 0;
 }
+#pipe-step-open,
+#pipe-step-reverse,
 #image-open,
 #image-clear,
 #step-open,
@@ -292,6 +295,10 @@ canvas:active {
 #brush-clear,
 #spatial-clear {
   width: 100%;
+}
+#pipe-step-fields:not([hidden]) {
+  display: grid;
+  gap: 8px;
 }
 /* === Base responsive layout === */
 @media (max-width: 850px) {
@@ -414,6 +421,8 @@ canvas:active {
 .view-tools .btn-icon:hover:not(:disabled) {
   opacity: 0.8;
 }
+#print-export:disabled,
+.render-modes .btn-icon:disabled,
 .view-tools .btn-icon:disabled,
 .playback-controls .btn-icon:disabled,
 .reset-button:disabled,
@@ -530,11 +539,11 @@ canvas:active {
   background: var(--ink, #111);
   color: var(--bg, #fff);
 }
-#tube-render-error:empty {
+#pipe-render-error:empty {
   display: none;
 }
 
-#tube-webgl {
+#pipe-webgl {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -552,7 +561,7 @@ canvas:active {
 }
 
 /* The global canvas display rule must not override the inactive WebGL layer. */
-#tube-webgl[hidden] {
+#pipe-webgl[hidden] {
   display: none;
 }
 
@@ -773,11 +782,11 @@ aside {
   display: none;
 }
 @media (max-height: 760px) {
-  #panel-tube .slider {
+  #panel-pipe .slider {
     margin: 8px 0;
   }
-  #panel-tube .inp,
-  #panel-tube .btn {
+  #panel-pipe .inp,
+  #panel-pipe .btn {
     min-height: 28px;
     padding: 3px 8px;
   }
@@ -845,14 +854,14 @@ aside {
 
 /* Preserve the layout while CSV preview temporarily locks editing. */
 .csv-edit-controls,
-.csv-tube-controls {
+.csv-pipe-controls {
   min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
 .csv-edit-controls:disabled,
-.csv-tube-controls:disabled {
+.csv-pipe-controls:disabled {
   opacity: 0.4;
 }
 
@@ -903,7 +912,6 @@ aside {
 
 /* Preview compensation is independent of render style and export choice. */
 #view-compensated { flex: none; border-radius: var(--r-sm); }
-#view-no-calculation[aria-pressed="true"],
 #view-compensated[aria-pressed="true"] { background: var(--display); color: var(--bg); }
 .view-mode-divider { flex: 0 0 1px; width: 1px; height: 16px; background: var(--line); }
 .export-original { width: 100%; justify-content: space-between; margin-top: 8px; }
@@ -960,6 +968,7 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
 }
 #serial-progress::-webkit-progress-bar {
   background: var(--line-2);
+  margin: 16px 0 0;
 }
 #serial-progress::-webkit-progress-value {
   background: var(--display);
@@ -1002,3 +1011,35 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
 #step-clear { margin-top: 8px; }
 
 .legend[hidden] { display: none; }
+
+#view-print[aria-busy="true"] .button-svg { visibility: hidden; }
+#view-print[aria-busy="true"]::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: calculation-spin .8s linear infinite; }
+#view-print { position: relative; justify-content: center; }
+
+.print-mode-tools { position: relative; display: flex; }
+#print-export { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); border-radius: var(--r-sm); }
+#print-export[hidden] { display: none; }
+
+/* Brush size sits beside its viewport tools, using the shared slider artwork. */
+#brush-view-tools,
+#spatial-view-tools { position: relative; }
+.brush-size-control {
+  position: absolute;
+  left: calc(100% + 16px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 144px;
+  border-radius: var(--r-md);
+  background: var(--glass);
+}
+.brush-size-control[hidden] { display: none; }
+.brush-size-control .slider {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 120px;
+  margin: 0;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  touch-action: none;
+}

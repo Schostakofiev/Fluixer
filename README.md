@@ -1,18 +1,18 @@
-# Fluixer 0.3.1
+# Fluixer 0.3.2
 
 A design tool to simulate and export csv of Fluixel, an information visualisation method based on liquid segments.
 https://fluixer-production.up.railway.app/
 ## Interactive pipeline curve
 
-Choose **Tube → Pipeline Curve → Interactive** to start from an open 80 mm line.
-While the Tube tab is active, left-drag the curve in the 3D view. The drag follows
+Choose **Pipe → Pipeline Curve → Interactive** to start from an open 80 mm line.
+While the Pipe tab is active, left-drag the curve in the 3D view. The drag follows
  the current view plane; rotate the view with the existing right-mouse controls
  to edit another spatial direction. **Grab Radius (mm)** sets the pointer picking radius
  (bounded on screen for usability).
 
 The curve updates during dragging; liquid/gas calculation and metrics update on
  release, after the rope settles. Escape cancels the current drag. Ctrl+Z and Ctrl+Shift+Z / Ctrl+Y undo
- and redo edits. Tube Reset restores the initial line. Curve geometry is included
+ and redo edits. Pipe Reset restores the initial line. Curve geometry is included
  in project saves and uses the existing animation, rendering, mapping and CSV flow.
 
 **Total Length (mm)** adds material at the tail endpoint or trims that tail.
@@ -25,19 +25,19 @@ there. Click a pin to select its XYZ move axes; Alt-click a pin to remove it. Tu
 Pins are saved with the project and included in undo/redo. Extension can continue
 past a pinned endpoint, leaving that pin at its original position. Trimming
 stops at the last pin. A taut section between two pins cannot bend until a pin
-is removed. Tube Reset clears the pins and restores the original 80 mm line.
+is removed. Pipe Reset clears the pins and restores the original 80 mm line.
 
 The length control normally covers 10–1000 mm. The minimum increases to protect
 pinned points. There are at most 129 editable particles; a fully subdivided
 curve with a pinned tail must release that tail pin before further extension.
-An extension that intersects the tube is rejected; move the endpoint first.
+An extension that intersects the pipe is rejected; move the endpoint first.
 There is no gravity or minimum bend-radius constraint.
 
 The browser implements a damped particle/constraint solver, using the structure
  of `cableCollide.ghx` as a reference: Divide/Shatter -> Line -> Length(Line) +
  Collider + Grab -> Solver. The sample uses 10 divisions, collider radius 0.2,
  length strength 10, collider/grab strength 1 and grab range 3. Fluixer uses the
- current tube outer radius and its own numerical weights; it does not run the
+ current pipe outer radius and its own numerical weights; it does not run the
  Kangaroo engine. Per-span spline-length goals propagate pulling through the
  rope, capsule contacts separate overlapping sections, and a grab goal follows
  the pointer. The solver advances on animation frames, including while the
@@ -61,11 +61,6 @@ Drag a selected pin's XYZ arrow to reposition that anchor along one axis.
 Other pins stay fixed; length and collision constraints limit the reachable position.
 Escape cancels a move, and undo/redo restores the curve and anchor position together.
 
-Disable Calculation in the viewport shows only tube geometry and total length.
-Tube editing and rope constraints remain active; liquid/gas partitioning and
-calibration preview are skipped. Playback and output stay disabled until calculation
-is enabled again. This temporary view mode does not change saved pattern settings.
-
 Tighten and Loosen use elapsed press time, not frame count. Release stops changing
 the requested length and lets the constraints settle; Escape cancels the whole press.
 Each press is one undo step. Tighten removes 20% of remaining slack per second.
@@ -75,5 +70,11 @@ the wheel can zoom. Geometry and endpoint markers follow the current camera.
 
 Brush offers 2D and 3D modes. 2D opens the projection plane for direct drawing
 with its transformed coordinates; deselect the brush or choose the plane gizmo
-to manipulate the plane. 3D paints on the visible tube and disables plane tools.
+to manipulate the plane. 3D paints on the visible pipe and disables plane tools.
 Both modes retain their own marks while switching and use the viewport tool icons.
+
+## 3D Print preview
+
+The third display icon shows a CAD enclosure with the inner-diameter channel subtracted.
+The enclosure orientation is searched by volume using CAD, principal-axis and world-axis candidates, then locally refined; this is a numerical tight-box search, not a proof of the global minimum. Outer diameter supplies the envelope thickness. The translucent solid exposes the buried channel.
+The preview is cached and recalculated after pipe geometry or inner diameter changes. It does not change simulation or CSV output. S-Shape and Hilbert channels extend along their endpoint tangents through the enclosure. The Export STEP icon appears in print mode and exports the same CAD solid in millimeters. Liquid segments remain a colored preview overlay and are not exported.

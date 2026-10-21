@@ -20,21 +20,21 @@ const tail=app.slice(app.indexOf('// Model edits have their own snapshots;'));
 const elements={},events={};
 const element=id=>elements[id]??={value:'1',checked:false,style:{},addEventListener(){}};
 const c={FluixerSerial:{init(){}},structuredClone,FluixerHistory:{History,shortcut},editHistory:null,imageHistoryPending:0,projectBusy:false,csvReading:false,importedCsv:null,stepBusy:false,exporting:false,
- tubeNames:['radius','height','diameter','wind'],$:element,curveState:{amplitude:0,x:[0,1],y:[0,0]},tubeCenter:[0,0,0],placement:{position:[0,0,0]},initialPlacement:{position:[0,0,0]},interactiveTargetLength:2,interactiveDrag:null,interactivePins:[],interactiveStiffness:.2,interactivePoints:[[0,0,0],[1,0,0],[2,0,0]],tubeStepSource:null,tubeStepReverse:false,innerDiameter:2,
+ pipeNames:['radius','height','diameter','wind'],$:element,curveState:{amplitude:0,x:[0,1],y:[0,0]},pipeCenter:[0,0,0],placement:{position:[0,0,0]},initialPlacement:{position:[0,0,0]},interactiveTargetLength:2,interactiveDrag:null,interactivePins:[],interactiveStiffness:.2,interactivePoints:[[0,0,0],[1,0,0],[2,0,0]],pipeStepSource:null,pipeStepReverse:false,innerDiameter:2,
  brushPixels:new Uint8Array(4),brushActive:null,spatialWindows:[],stepActive:null,stepPlacement:null,imageActive:null,imageRaster:{data:new Uint8Array([3])},imagePhoto:null,imagePhotoSource:'source',
- requestId:0,imageReadId:0,imageProcessId:0,stepReadId:0,tubeStepReadId:0,imagePhotoPending:null,tubeKind:'cylinder',selectedPoint:null,stepDraft:null,canvas:{style:{}},
- patternType:()=>element('pattern-type').value,syncBrushMode(){},spatialErase:null,clonePlane:structuredClone, setCurve(v){c.curveState=v;element('curve-amplitude').value=String(v.amplitude);},tubeLabels(){},paintBrush(){},paintImage(){},syncRenderControls(){},syncPlaneTools(){},syncSliderFill(){},
+ requestId:0,imageReadId:0,imageProcessId:0,stepReadId:0,pipeStepReadId:0,imagePhotoPending:null,pipeKind:'cylinder',selectedPoint:null,stepDraft:null,canvas:{style:{}},
+ patternType:()=>element('pattern-type').value,syncBrushMode(){},spatialErase:null,clonePlane:structuredClone, setCurve(v){c.curveState=v;element('curve-amplitude').value=String(v.amplitude);},pipeLabels(){},paintBrush(){},paintImage(){},syncRenderControls(){},syncPlaneTools(){},syncSliderFill(){},
  loadDisplay(){c.requestId++;c.commitEditHistory();},queueMicrotask:f=>f(),
  document:{querySelectorAll:()=>[],querySelector:()=>null,addEventListener:(n,f)=>events[n]=f},window:{addEventListener(){}},
  yaw:0.4,planeVisible:false,animationProgress:.3};
-element('curve-amplitude').value='0';element('tube-type').value='cylinder';element('pattern-type').value='image';
+element('curve-amplitude').value='0';element('pipe-type').value='cylinder';element('pattern-type').value='image';
 vm.createContext(c);vm.runInContext(tail,c);
-element('tube-radius').value='50';c.commitEditHistory();assert.equal(c.editHistory.undo.length,1);
-c.moveEditHistory();assert.equal(element('tube-radius').value,'1');assert.equal(c.yaw,.4);assert.equal(c.planeVisible,false);assert.equal(c.animationProgress,.3);
-c.moveEditHistory(true);assert.equal(element('tube-radius').value,'50');
+element('pipe-radius').value='50';c.commitEditHistory();assert.equal(c.editHistory.undo.length,1);
+c.moveEditHistory();assert.equal(element('pipe-radius').value,'1');assert.equal(c.yaw,.4);assert.equal(c.planeVisible,false);assert.equal(c.animationProgress,.3);
+c.moveEditHistory(true);assert.equal(element('pipe-radius').value,'50');
 const raster=c.imageRaster;c.imageActive={source:'changed'};c.brushPixels[0]=1;c.commitEditHistory();c.moveEditHistory();assert.equal(c.imageActive,null);assert.equal(c.brushPixels[0],0);assert.equal(c.imageRaster,raster);
 c.moveEditHistory(true);assert.equal(c.brushPixels[0],1);
 // Old computation must not commit while an undo-triggered request is queued.
 assert(app.includes('if (current !== requestId) return;'));
-assert(app.includes('if (!editHistory?.restoring) followTubeResize();'));
+assert(app.includes('if (!editHistory?.restoring) followPipeResize();'));
 console.log('PASS: grouping, redo invalidation, 100-step cap, CSV boundary, keyboard routing, state restoration, image retention, view preservation.');

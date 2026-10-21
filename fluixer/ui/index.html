@@ -6,7 +6,7 @@
     <title>Fluixer {{VERSION}}</title>
     <link rel="stylesheet" href="/css/nothing-ui.css" />
     <link rel="stylesheet" href="/style.css" />
-    <script src="/tube-renderer.js" defer></script>
+    <script src="/pipe-renderer.js" defer></script>
     <script src="/image-input.js" defer></script>
     <script src="/history.js" defer></script>
     <script src="/visual-calibration.js" defer></script>
@@ -42,14 +42,14 @@
             Pattern
           </button>
           <button
-            id="tab-tube"
+            id="tab-pipe"
             type="button"
             role="tab"
-            aria-controls="panel-tube"
+            aria-controls="panel-pipe"
             aria-selected="false"
             tabindex="-1"
           >
-            Tube
+            Pipe
           </button>
           <button
             id="tab-output"
@@ -98,9 +98,9 @@
             <label for="pattern-type">Pattern Type</label>
             <select class="inp" id="pattern-type">
               <option value="captured-s">S</option>
-              <option value="step">STEP</option>
-              <option value="image">Image</option>
               <option value="brush">Brush</option>
+              <option value="image">Image</option>
+              <option value="step">STEP</option>
             </select>
             <div id="brush-mode-fields" hidden>
               <label for="brush-mode">Brush Mode</label>
@@ -135,23 +135,9 @@
               <p id="image-status" role="status"></p>
             </div>
             <div id="spatial-fields" hidden>
-
-              <label for="spatial-size">Brush Size</label>
-              <input
-                class="slider"
-                id="spatial-size"
-                type="range"
-                min="4"
-                max="80"
-                value="24"
-                aria-label="Brush Size"
-              />
               <button class="btn btn-outline btn-danger" id="spatial-clear" type="button">Clear</button>
             </div>
             <div id="brush-fields" hidden>
-
-              <label for="brush-size">Brush Size</label>
-              <input class="slider" id="brush-size" type="range" min="2" max="64" value="16" />
               <button class="btn btn-outline btn-danger" id="brush-clear" type="button">Clear</button>
               <p id="brush-status" class="note" role="status"></p>
             </div>
@@ -166,42 +152,38 @@
               </button>
               <button class="btn btn-outline btn-danger" id="step-clear" type="button" disabled>Clear</button>
             </div>
-            <label for="mapping-type">Mapping Type</label>
-            <select class="inp" id="mapping-type">
-              <option value="projection">Projection</option>
-              <option value="surface-flow" disabled>Surface Flow (NA)</option>
-            </select>
           </section>
         </fieldset>
         </div>
         <div
-          id="panel-tube"
+          id="panel-pipe"
           class="sidebar-panel"
           role="tabpanel"
-          aria-labelledby="tab-tube"
+          aria-labelledby="tab-pipe"
           hidden
         >
-          <fieldset class="csv-tube-controls">
+          <fieldset class="csv-pipe-controls">
           <section>
             <div class="sidebar-section-heading">
-              <h2>Tube</h2>
+              <h2>Pipe</h2>
               <button
                 class="btn-icon reset-button--compact reset-button"
-                id="tube-reset"
+                id="pipe-reset"
                 type="button"
-                aria-label="Reset Tube"
-                title="Reset Tube"
+                aria-label="Reset Pipe"
+                title="Reset Pipe"
               >
                 <img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
             </div>
-            <label for="tube-type">Pipeline Curve</label>
-            <select class="inp" id="tube-type">
+            <label for="pipe-type">Pipeline Curve</label>
+            <select class="inp" id="pipe-type">
               <option value="cylinder">Cylinder Helix</option>
-              <option value="s-curve">S-Shape</option>
+              <option value="s-curve">S-Curve</option>
               <option value="hilbert">Hilbert</option>
-              <option value="custom-step">Custom</option>
               <option value="interactive">Interactive</option>
+              <option value="custom-step">STEP</option>
+              
             </select>
             <div id="interactive-fields" hidden>
 
@@ -221,12 +203,12 @@
                 <input class="inp" id="interactive-length-value" type="number" min="10" max="1000" step="1" value="80" aria-label="Total Length (mm)" />
               </div>
             </div>
-            <div id="tube-step-fields" hidden>
-              <button class="btn btn-outline" id="tube-step-open" type="button">Import</button>
-              <input id="tube-step-file" type="file" accept=".stp,.step" hidden />
+            <div id="pipe-step-fields" hidden>
+              <button class="btn btn-outline" id="pipe-step-open" type="button">Import</button>
+              <input id="pipe-step-file" type="file" accept=".stp,.step" hidden />
               <button
                 class="btn btn-outline"
-                id="tube-step-reverse"
+                id="pipe-step-reverse"
                 type="button"
                 aria-pressed="false"
               >
@@ -234,12 +216,12 @@
               </button>
             </div>
             <div class="pair">
-              <div id="tube-radius-field">
-                <label id="tube-radius-label" for="tube-radius">Radius (mm)</label>
+              <div id="pipe-radius-field">
+                <label id="pipe-radius-label" for="pipe-radius">Radius (mm)</label>
                 <div class="slider-number-row">
                   <input
                     class="slider"
-                    id="tube-slider-radius"
+                    id="pipe-slider-radius"
                     type="range"
                     min="1"
                     max="500"
@@ -249,7 +231,7 @@
                   />
                   <input
                     class="inp"
-                    id="tube-radius"
+                    id="pipe-radius"
                     type="number"
                     min="1"
                     max="500"
@@ -258,12 +240,12 @@
                   />
                 </div>
               </div>
-              <div id="tube-height-field">
-                <label for="tube-height">Height (mm)</label>
+              <div id="pipe-height-field">
+                <label for="pipe-height">Height (mm)</label>
                 <div class="slider-number-row">
                   <input
                     class="slider"
-                    id="tube-slider-height"
+                    id="pipe-slider-height"
                     type="range"
                     min="1"
                     max="1000"
@@ -273,7 +255,7 @@
                   />
                   <input
                     class="inp"
-                    id="tube-height"
+                    id="pipe-height"
                     type="number"
                     min="1"
                     max="1000"
@@ -286,11 +268,11 @@
             <fieldset class="csv-edit-controls">
             <div class="pair">
               <div>
-                <label for="tube-inner">Inner Diameter (mm)</label>
+                <label for="pipe-inner">Inner Diameter (mm)</label>
                 <div class="slider-number-row">
                   <input
                     class="slider"
-                    id="tube-inner-slider"
+                    id="pipe-inner-slider"
                     type="range"
                     min="0.01"
                     max="3.99"
@@ -300,7 +282,7 @@
                   />
                   <input
                     class="inp"
-                    id="tube-inner"
+                    id="pipe-inner"
                     type="number"
                     min="0.01"
                     max="3.99"
@@ -310,11 +292,11 @@
                 </div>
               </div>
               <div>
-                <label for="tube-diameter">Outer Diameter (mm)</label>
+                <label for="pipe-diameter">Outer Diameter (mm)</label>
                 <div class="slider-number-row">
                   <input
                     class="slider"
-                    id="tube-slider-diameter"
+                    id="pipe-slider-diameter"
                     type="range"
                     min="0.1"
                     max="100"
@@ -324,7 +306,7 @@
                   />
                   <input
                     class="inp"
-                    id="tube-diameter"
+                    id="pipe-diameter"
                     type="number"
                     min="0.1"
                     max="100"
@@ -335,12 +317,12 @@
               </div>
             </div>
             </fieldset>
-            <div id="tube-wind-field">
-              <label id="tube-wind-label" for="tube-wind">Windings</label>
+            <div id="pipe-wind-field">
+              <label id="pipe-wind-label" for="pipe-wind">Windings</label>
               <div class="slider-number-row">
                 <input
                   class="slider"
-                  id="tube-slider-wind"
+                  id="pipe-slider-wind"
                   type="range"
                   min="1"
                   max="64"
@@ -350,7 +332,7 @@
                 />
                 <input
                   class="inp"
-                  id="tube-wind"
+                  id="pipe-wind"
                   type="number"
                   min="1"
                   max="64"
@@ -359,7 +341,7 @@
                 />
               </div>
             </div>
-            <p id="tube-render-error" role="status"></p>
+            <p id="pipe-render-error" role="status"></p>
           </section>
         </fieldset>
         </div>
@@ -465,6 +447,7 @@
               <button class="btn btn-primary" id="serial-compensated" type="button" disabled>Run Compensated<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
               <button class="btn btn-outline" id="serial-original" type="button" disabled>Run Original<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
             </div>
+            <progress id="serial-progress" value="0" max="1" aria-label="Serial execution progress"></progress>
             <div class="playback-controls serial-playback">
               <button class="btn-icon" id="serial-start" type="button" title="Run CSV" aria-label="Run CSV" hidden disabled><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
               <button class="btn-icon" id="serial-pause" type="button" title="Pause after current command" aria-label="Pause after current command" disabled>
@@ -474,7 +457,7 @@
                 <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
               </button>
             </div>
-            <progress id="serial-progress" value="0" max="1" aria-label="Serial execution progress"></progress>
+
             <p id="serial-status" role="alert" hidden></p>
           </section>
 
@@ -484,9 +467,6 @@
         <div class="viewport">
         <div class="view-header">
           <div class="view-buttons">
-            <button id="view-no-calculation" class="btn-icon" type="button" aria-label="Disable Calculation" title="Disable Calculation" aria-pressed="false">
-              <img class="ico button-svg" src="/svg/view-no-calculation.svg" alt="" aria-hidden="true" draggable="false" />
-            </button>
             <button id="view-compensated" class="btn-icon" type="button" aria-label="Compensated Preview" title="Compensated Preview" aria-pressed="false">
               <img class="ico button-svg" src="/svg/view-compensated.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
@@ -512,6 +492,14 @@
               >
                 <img class="ico button-svg" src="/svg/view-render.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
+              <div class="print-mode-tools">
+                <button id="view-print" class="btn-icon" type="button" aria-label="3D Print" title="3D Print" aria-pressed="false">
+                  <img class="ico button-svg" src="/svg/view-print.svg" alt="" aria-hidden="true" draggable="false" />
+                </button>
+                <button id="print-export" class="btn-icon" type="button" title="Export STEP" aria-label="Export STEP" hidden disabled>
+                  <img class="ico button-svg" src="/svg/export-step.svg" alt="" aria-hidden="true" draggable="false" />
+                </button>
+              </div>
             </div>
             <button class="btn btn-outline reset-button" id="reset" type="button"><img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />Reset View</button>
           </div>
@@ -520,6 +508,9 @@
             <div id="brush-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="2D Brush Tools">
                 <button class="btn-icon" id="brush-pen" type="button" aria-label="Brush" title="Brush" aria-pressed="false"><img class="ico button-svg" src="/svg/brush.svg" alt="" aria-hidden="true" draggable="false" /></button>
                 <button class="btn-icon" id="brush-eraser" type="button" aria-label="Eraser" title="Eraser" aria-pressed="false"><img class="ico button-svg" src="/svg/eraser.svg" alt="" aria-hidden="true" draggable="false" /></button>
+                <div id="brush-size-control" class="brush-size-control" hidden>
+                  <input class="slider" id="brush-size" type="range" min="2" max="64" value="16" aria-label="Brush Size" aria-orientation="vertical" title="Brush Size" />
+                </div>
               </div>
             <div id="interactive-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="Interactive Curve Tools">
                 <button class="btn-icon" id="interactive-pin" type="button" aria-label="Pin Curve" title="Pin Curve: click to select, Alt-click to remove" aria-pressed="false">
@@ -535,6 +526,9 @@
             <div id="spatial-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="Spatial Brush Tools">
                 <button class="btn-icon" id="spatial-pen" type="button" aria-label="Brush" title="Brush" aria-pressed="false"><img class="ico button-svg" src="/svg/brush.svg" alt="" aria-hidden="true" draggable="false" /></button>
                 <button class="btn-icon" id="spatial-eraser" type="button" aria-label="Eraser" title="Eraser" aria-pressed="false"><img class="ico button-svg" src="/svg/eraser.svg" alt="" aria-hidden="true" draggable="false" /></button>
+                <div id="spatial-size-control" class="brush-size-control" hidden>
+                  <input class="slider" id="spatial-size" type="range" min="4" max="80" value="24" aria-label="Brush Size" aria-orientation="vertical" title="Brush Size" />
+                </div>
               </div>
           </div>
           <div class="view-tools" role="toolbar" aria-label="View Tools">
@@ -583,7 +577,7 @@
             <option value="gumball">Coordinate Axis</option>
             <option value="direction">Projection Direction</option>
           </select>
-          <canvas id="tube-webgl" aria-hidden="true"></canvas>
+          <canvas id="pipe-webgl" aria-hidden="true"></canvas>
           <canvas
             id="preview"
             tabindex="0"
@@ -705,6 +699,7 @@
           <button class="btn btn-outline" id="calibration-file-open" type="button">Import Photo</button>
           <input id="calibration-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
           <button class="btn btn-outline" id="calibration-pick-color" type="button" aria-pressed="false" disabled>Pick Color</button>
+          <button class="btn btn-outline" id="calibration-scale-pick" type="button" aria-pressed="false" disabled>Calibrate 80 mm</button>
           <label for="calibration-mode">Endpoints</label>
           <select class="inp" id="calibration-mode">
             <option value="auto">Automatic</option>

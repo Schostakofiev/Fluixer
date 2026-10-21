@@ -1,7 +1,7 @@
 """Standard vertical leveling stripe: one literal 100-step liquid move per row.
 
 Only gas spacing and Pre-Add use the user's measured step length and gas factor.
-Tube-height geometric compensation shifts the stripe; pattern plane, liquid
+Pipe-height geometric compensation shifts the stripe; pattern plane, liquid
 factor and output-unit settings do not participate.
 """
 import csv
@@ -9,7 +9,7 @@ import io
 import math
 from .cubic import CubicSpan, unit_roots
 from .geometry import Line, finite
-from .pipeline import cylinder_settings, tube_path, path_bounds
+from .pipeline import cylinder_settings, pipe_path, path_bounds
 from .compensation import curve_settings
 from .path_partition import compensation_transform
 from .export import HEADER, MachineParameters, build_rows
@@ -18,14 +18,14 @@ STANDARD_STEPS = 100
 
 
 def row_centers(cylinder, curve=None):
-    """Arc-length positions crossing the tube's central vertical stripe.
+    """Arc-length positions crossing the pipe's central vertical stripe.
 
     A helix contributes only its front crossing; an S contributes every straight
     pass. Using real path lengths preserves bends and the cylinder's helical rise.
     """
     if cylinder.type not in ('cylinder', 's-curve'):
         raise ValueError('Standard leveling supports Cylinder Helix and S-Shape only')
-    path=tube_path(cylinder)
+    path=pipe_path(cylinder)
     lo,hi=path_bounds(path)
     center_x=(lo[0]+hi[0])/2
     center_y=(lo[1]+hi[1])/2
@@ -35,7 +35,7 @@ def row_centers(cylinder, curve=None):
     centers=[];start=0.0
     for piece in path.pieces:
         if active and isinstance(piece, (CubicSpan, Line)):
-            # Use the same tube-height displacement as ordinary pattern slicing.
+            # Use the same pipe-height displacement as ordinary pattern slicing.
             def value(t):
                 return transform(piece.point_at(t))[0] - center_x
             candidates=[]
@@ -70,7 +70,7 @@ def row_centers(cylinder, curve=None):
         start+=piece.length
     expected=cylinder.wind*(2 if cylinder.type=='s-curve' else 1)
     if len(centers)!=expected:
-        raise ValueError('Could not identify one standard segment for each tube row')
+        raise ValueError('Could not identify one standard segment for each pipe row')
     return centers
 
 
@@ -92,7 +92,7 @@ def standard_rows(data):
     gaps=[(b-a)/divisor-STANDARD_STEPS for a,b in zip(centers,centers[1:])]
     tail=(centers[0]+pre_add)/divisor-STANDARD_STEPS/2
     if any(not math.isfinite(v) or v<=0 for v in gaps) or not math.isfinite(tail) or tail<0:
-        raise ValueError('The current gas calibration leaves insufficient space for 100-step segments. Increase the tube size or check 100 Steps Length')
+        raise ValueError('The current gas calibration leaves insufficient space for 100-step segments. Increase the pipe size or check 100 Steps Length')
     # Round cumulative gas budgets from the physical inlet, including Pre-Add.
     # Subtract the exact liquid budgets before applying the gas factor. Rounding
     # each gas gap separately would accumulate a positional error on every row.
@@ -106,7 +106,7 @@ def standard_rows(data):
     boundaries=[round(value) for value in cumulative]
     gas_steps=[boundaries[0]]+[b-a for a,b in zip(boundaries,boundaries[1:])]
     if gas_steps[0]<0 or any(value<1 for value in gas_steps[1:]):
-        raise ValueError('Gas spacing is below one step. Increase the tube size or check calibration parameters')
+        raise ValueError('Gas spacing is below one step. Increase the pipe size or check calibration parameters')
     # Values are already gas motor steps. A neutral factor retains the shared
     # 2000-step splitting policy without applying k_Gas a second time.
     machine=MachineParameters(speed,625,625)

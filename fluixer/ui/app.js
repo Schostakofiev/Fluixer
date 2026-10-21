@@ -23,11 +23,12 @@ function uiColor(name, fallback) {
 const $ = (id) => document.getElementById(id),
   canvas = $('preview'),
   ctx = canvas.getContext('2d');
+let printPreview = null, printPending = false, printErrorKey = null, printExporting = false, printRequest = null;
 let renderMode = 'lines',
   innerDiameter = 2,
-  tubeRenderer = null;
+  pipeRenderer = null;
 let planeVisible = false,
-  tubeCenter = null;
+  pipeCenter = null;
 let initialPlacement = null,
   placement = null,
   planeHandles = [],
@@ -35,7 +36,6 @@ let initialPlacement = null,
 let interactivePoints = defaultInteractivePoints(), interactiveDrag = null, interactiveTargetLength = 80;
 let interactivePins = [], interactiveTool = null, interactiveStiffness = .2;
 let selectedInteractivePin = null;
-let calculationDisabled = false;
 let interactivePreviewDirty=false,interactivePreviewTimer=null;
 let display = null,
   yaw = -0.55,
@@ -100,7 +100,7 @@ function syncPlayback() {
     'playback-progress',
     'playback-rate',
   ])
-    $(id).disabled = interactivePreviewDirty || calculationDisabled || !!display?.geometry_only || !display || projectBusy || previewLoading || csvReading;
+    $(id).disabled = interactivePreviewDirty || !display || projectBusy || previewLoading || csvReading;
   syncPlaybackProgress();
 }
 // Per-frame updates never refresh unrelated controls or start requests.
@@ -216,7 +216,7 @@ function csvPreviewWindows(sequence, pathLength, progress) {
     if (command.phase === 'liquid' && end > start) windows.push([start, end]);
     injected += command.length;
   }
-  // Injection order is opposite to increasing distance along the tube.
+  // Injection order is opposite to increasing distance along the pipe.
   return windows.reverse();
 }
 // CSV_PREVIEW_CORE_END
@@ -282,7 +282,7 @@ function syncCurrentOutput() {
   const el = $('current-output-value');
   const unitLabel = $('current-output-unit');
   unitLabel.textContent = $('unit').value === 'segments' ? 'segments' : 'steps';
-  if (interactivePreviewDirty || calculationDisabled || display?.geometry_only || !display || previewLoading || projectBusy || csvReading) { el.textContent = '—'; return; }
+  if (interactivePreviewDirty || !display || previewLoading || projectBusy || csvReading) { el.textContent = '—'; return; }
   const unit = $('unit').value === 'segments' ? 'segments' : 'steps';
   let timeline;
   if (importedCsv) {
@@ -500,6 +500,7 @@ function project(point, w, h) {
   return createProjector(w, h)(point);
 }
 function draw() {
+  syncPrintExport();
   syncCurrentOutput();
   if (viewDrawFrame !== null) {
     window.cancelAnimationFrame(viewDrawFrame);
@@ -549,29 +550,18 @@ function draw() {
     ctx.lineTo(x - 5 * Math.cos(angle + 0.45), y - 5 * Math.sin(angle + 0.45));
     ctx.stroke();
   }
-  if (interactiveDrag || (interactivePreviewDirty && $('tube-type').value==='interactive')) {
-    $('tube-webgl').hidden = true;
+  if (interactiveDrag || (interactivePreviewDirty && $('pipe-type').value==='interactive')) {
+    $('pipe-webgl').hidden = true;
     drawInteractiveCurve(rect);drawInteractivePins(rect);
     return;
   }
-  if(calculationDisabled || display?.geometry_only) {
-    $('tube-webgl').hidden=true;
-    if(display) {
-      ctx.strokeStyle=uiColor('secondary','#585A5A');ctx.lineWidth=2.2;ctx.globalAlpha=1;
-      ctx.beginPath();
-      for(const segment of display.segments)segment.points.forEach((point,i)=>{
-        const p=projectPoint(point);i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);
-      });
-      ctx.stroke();drawCurveEndpoints(display.segments,projectPoint);drawInteractivePins(rect);
-    }
-    return;
-  }
-  $('tube-webgl').hidden = renderMode !== 'render' || !display;
+  const printModel=renderMode==='print' && display ? currentPrintPreview() : null;
+  $('pipe-webgl').hidden = renderMode==='lines' || (renderMode==='print'&&!printModel) || !display;
   if (!display) return;
-  if (renderMode === 'render' && window.FluixerTubeRenderer) {
+  if ((renderMode === 'render' || (renderMode==='print'&&printModel)) && window.FluixerPipeRenderer) {
     try {
-      tubeRenderer = tubeRenderer || new window.FluixerTubeRenderer($('tube-webgl'));
-      tubeRenderer.draw(
+      pipeRenderer = pipeRenderer || new window.FluixerPipeRenderer($('pipe-webgl'));
+      pipeRenderer.draw(
         display,
         animatedSegments(display, animationProgress),
         Math.min(innerDiameter, display.cylinder.diameter * 0.999),
@@ -581,9 +571,10 @@ function draw() {
         [panX, panY],
         rect,
         ratio,
+        printModel,
       );
     } catch (error) {
-      $('tube-render-error').textContent = error.message;
+      $('pipe-render-error').textContent = error.message;
     }
     drawPlane(rect);drawCurveEndpoints(display.segments,projectPoint);drawInteractivePins(rect);
     return;
@@ -645,51 +636,109 @@ function drawCurveEndpoints(segments,projectPoint) {
   }
   ctx.restore();
 }
+function syncPrintExport() {
+  const button=$('print-export');
+  button.hidden=renderMode!=='print';
+  button.disabled=printExporting || printPending || previewLoading || projectBusy || !display || interactivePreviewDirty || printPreview?.key!==JSON.stringify([display?.cylinder,innerDiameter]);
+  button.setAttribute('aria-busy',String(printExporting));
+}
+$('print-export').addEventListener('click',async()=>{
+  if($('print-export').disabled)return;
+  const payload={cylinder:display.cylinder,inner:innerDiameter};
+  printExporting=true;syncPrintExport();
+  try {
+    const response=await fetch('/api/print-step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!response.ok){const error=await response.json();throw Error(error.error||'STEP export failed');}
+    downloadBlob(await response.blob(),'fluixer-print.step');
+    $('pipe-render-error').textContent='';
+  }catch(error){$('pipe-render-error').textContent=error.message;}
+  finally{printExporting=false;syncPrintExport();}
+});
+function cancelPrintPreview() {
+  const request=printRequest;
+  printRequest=null;
+  request?.controller.abort();
+  printPending=false;
+  $('view-print').setAttribute('aria-busy','false');
+}
+function currentPrintPreview() {
+  if (renderMode!=='print' || $('pipe-type').value === 'cylinder' || (display.cylinder.type || 'cylinder') === 'cylinder') return null;
+  const key=JSON.stringify([display.cylinder,innerDiameter]);
+  if(printRequest && printRequest.key!==key)cancelPrintPreview();
+  if(printPreview?.key===key)return printPreview.model;
+  if(!printPending && printErrorKey!==key){
+    const request={key,controller:new AbortController()};
+    printRequest=request;
+    printPending=true;
+    $('view-print').setAttribute('aria-busy','true');
+    fetch('/api/print-preview',{method:'POST',signal:request.controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({cylinder:display.cylinder,inner:innerDiameter})})
+      .then(async response=>{
+        const data=await response.json();
+        if(printRequest!==request || renderMode!=='print')return;
+        if(!response.ok)throw Error(data.error||'Print preview failed');
+        printPreview={key,model:data};printErrorKey=null;$('pipe-render-error').textContent='';
+      })
+      .catch(error=>{
+        if(printRequest!==request || error.name==='AbortError')return;
+        printErrorKey=key;$('pipe-render-error').textContent=error.message;
+      })
+      .finally(()=>{
+        if(printRequest!==request)return;
+        printRequest=null;printPending=false;$('view-print').setAttribute('aria-busy','false');requestViewDraw();
+      });
+  }
+  return null;
+}
 function syncRenderControls() {
-  $('view-lines').ariaPressed = String(calculationDisabled || renderMode === 'lines');
-  $('view-render').disabled=calculationDisabled;
-  $('view-render').ariaPressed = String(!calculationDisabled && renderMode === 'render');
-  const outer = Number($('tube-diameter').value) || 4;
+  const printDisabled = $('pipe-type').value === 'cylinder';
+  $('view-print').disabled = printDisabled;
+  if (printDisabled && renderMode === 'print') renderMode = 'lines';
+  if (renderMode !== 'print') cancelPrintPreview();
+  $('view-lines').ariaPressed = String(renderMode === 'lines');
+  $('view-render').ariaPressed = String(renderMode === 'render');
+  $('view-print').ariaPressed = String(renderMode === 'print');
+  const outer = Number($('pipe-diameter').value) || 4;
   if (innerDiameter >= outer) innerDiameter = outer * 0.5;
-  for (const id of ['tube-inner', 'tube-inner-slider']) {
+  for (const id of ['pipe-inner', 'pipe-inner-slider']) {
     $(id).max = Math.max(0.01, outer - 0.01);
     $(id).value = innerDiameter;
   }
-  syncSliderFill($('tube-inner-slider'));
+  syncSliderFill($('pipe-inner-slider'));
 }
-for (const mode of ['lines', 'render'])
+for (const mode of ['lines', 'render', 'print'])
   $('view-' + mode).addEventListener('click', () => {
+    if ($('view-' + mode).disabled) return;
     renderMode = mode;
     syncRenderControls();
     draw();
   });
-for (const id of ['tube-inner', 'tube-inner-slider'])
+for (const id of ['pipe-inner', 'pipe-inner-slider'])
   $(id).addEventListener('input', () => {
     const value = Number($(id).value),
-      outer = Number($('tube-diameter').value);
+      outer = Number($('pipe-diameter').value);
     if (!Number.isFinite(value) || value <= 0 || value >= outer) {
-      $('tube-render-error').textContent =
+      $('pipe-render-error').textContent =
         'Inner diameter must be positive and smaller than the outer diameter';
       return;
     }
-    $('tube-render-error').textContent = '';
+    $('pipe-render-error').textContent = '';
     innerDiameter = value;
     syncRenderControls();
     draw();
   });
-const DEFAULT_TUBE = { radius: 40, diameter: 4, height: 75, wind: 16 };
-let tubeStepSource = null,
-  tubeStepReverse = false,
-  tubeStepReadId = 0;
-const tubeNames = ['radius', 'diameter', 'height', 'wind'];
-function validateTube(c) {
+const DEFAULT_PIPE = { radius: 40, diameter: 4, height: 75, wind: 16 };
+let pipeStepSource = null,
+  pipeStepReverse = false,
+  pipeStepReadId = 0;
+const pipeNames = ['radius', 'diameter', 'height', 'wind'];
+function validatePipe(c) {
   if (
     !c ||
-    !tubeNames.every((n) => Object.hasOwn(c, n)) ||
+    !pipeNames.every((n) => Object.hasOwn(c, n)) ||
     Object.keys(c).some(
       (n) =>
         ![
-          ...tubeNames,
+          ...pipeNames,
           'type',
           'mapping',
           'placement',
@@ -705,7 +754,7 @@ function validateTube(c) {
         ].includes(n),
     )
   )
-    throw Error('Incomplete tube parameters');
+    throw Error('Incomplete pipe parameters');
   for (const [n, lo, hi] of [
     ['radius', 1, 500],
     ['diameter', 0.1, 100],
@@ -713,11 +762,11 @@ function validateTube(c) {
     ['wind', 1, 64],
   ])
     if (typeof c[n] !== 'number' || !Number.isFinite(c[n]) || c[n] < lo || c[n] > hi)
-      throw Error('Tube parameter out of range: ' + n);
+      throw Error('Pipe parameter out of range: ' + n);
   if (c.mapping !== undefined && c.mapping !== 'projection')
     throw Error('Invalid mapping method');
   if (c.type !== undefined && !['cylinder', 's-curve', 'hilbert', 'custom-step', 'interactive'].includes(c.type))
-    throw Error('Invalid tube type');
+    throw Error('Invalid pipe type');
   if (c.type === 'interactive') {
     validateInteractivePoints(c.points);
     if (c.avoid_collisions !== true || !Number.isFinite(c.target_length) || c.target_length <= 0 || !Array.isArray(c.pins) || new Set(c.pins).size !== c.pins.length || c.pins.some(i=>!Number.isInteger(i)||i<0||i>=c.points.length)) throw Error('Invalid Interactive constraints');
@@ -738,32 +787,31 @@ function validateTube(c) {
       c.center.length !== 3 ||
       c.center.some((v) => !Number.isFinite(v) || Math.abs(v) > 1e6))
   )
-    throw Error('Invalid tube center');
+    throw Error('Invalid pipe center');
   if (!Number.isInteger(c.wind)) throw Error('Windings must be an integer');
   return c;
 }
-function selectedTube() {
+function selectedPipe() {
   const c = {};
-  for (const n of tubeNames) {
-    if (String($('tube-' + n).value).trim() === '') throw Error('Complete all tube parameters');
-    c[n] = Number($('tube-' + n).value);
+  for (const n of pipeNames) {
+    if (String($('pipe-' + n).value).trim() === '') throw Error('Complete all pipe parameters');
+    c[n] = Number($('pipe-' + n).value);
   }
-  if ($('tube-type').value !== 'cylinder') {
-    c.type = $('tube-type').value;
+  if ($('pipe-type').value !== 'cylinder') {
+    c.type = $('pipe-type').value;
     c.radius /= 2;
   }
-  if ($('mapping-type').value !== 'projection') throw Error('Surface flow is not available yet');
-  if (tubeCenter) c.center = tubeCenter.slice();
+  if (pipeCenter) c.center = pipeCenter.slice();
   if (placement) c.placement = clonePlane(placement);
   if (initialPlacement) c.initial_placement = clonePlane(initialPlacement);
   if (c.type === 'custom-step') {
-    c.source = tubeStepSource;
-    c.reverse = tubeStepReverse;
+    c.source = pipeStepSource;
+    c.reverse = pipeStepReverse;
   }
   if (c.type === 'interactive') { c.points = structuredClone(interactivePoints); delete c.center;
     c.target_length = interactiveTargetLength;
     c.avoid_collisions = true; c.pins = interactivePins.slice(); c.stiffness = interactiveStiffness; }
-  return validateTube(c);
+  return validatePipe(c);
 }
 function planeKey(p) {
   return p
@@ -777,7 +825,7 @@ function planeKey(p) {
       ])
     : null;
 }
-function sameTube(a, b) {
+function samePipe(a, b) {
   return (
     !!b &&
     JSON.stringify(a.center || null) === JSON.stringify(b.center || null) &&
@@ -789,126 +837,121 @@ function sameTube(a, b) {
     (a.mapping || 'projection') === 'projection' &&
     (b.mapping || 'projection') === 'projection' &&
     (a.type || 'cylinder') === (b.type || 'cylinder') &&
-    tubeNames.every((n) => a[n] === b[n])
+    pipeNames.every((n) => a[n] === b[n])
   );
 }
-let tubeKind = 'cylinder';
-function tubeLabels() {
-  const calibrationAvailable = ['cylinder', 's-curve'].includes($('tube-type').value);
+let pipeKind = 'cylinder';
+function pipeLabels() {
+  const calibrationAvailable = ['cylinder', 's-curve'].includes($('pipe-type').value);
   $('tab-calibration').disabled = !calibrationAvailable;
   if (!calibrationAvailable && !$('panel-calibration').hidden) {
-    selectSidebarTab('tube');
+    selectSidebarTab('pipe');
   }
-  const isS = $('tube-type').value !== 'cylinder',
-    isH = $('tube-type').value === 'hilbert';
-  for (const id of ['tube-wind', 'tube-slider-wind']) $(id).max = isH ? 6 : 64;
-  const custom = $('tube-type').value === 'custom-step';
-  const interactive = $('tube-type').value === 'interactive';
+  const isS = $('pipe-type').value !== 'cylinder',
+    isH = $('pipe-type').value === 'hilbert';
+  for (const id of ['pipe-wind', 'pipe-slider-wind']) $(id).max = isH ? 6 : 64;
+  const custom = $('pipe-type').value === 'custom-step';
+  const interactive = $('pipe-type').value === 'interactive';
   $('interactive-fields').hidden = !interactive;
   syncInteractiveControls();
-  $('tube-step-fields').hidden = !custom;
-  for (const n of ['radius', 'height', 'wind']) $('tube-' + n + '-field').hidden = custom || interactive;
-  $('mapping-type').value = 'projection';
-  $('mapping-type').disabled = projectBusy;
-  $('tube-radius-label').textContent = isS ? 'Width (mm)' : 'Radius (mm)';
-  $('tube-wind-label').textContent = isH ? 'Order' : isS ? 'Passes' : 'Windings';
-  for (const id of ['tube-radius', 'tube-slider-radius']) {
+  $('pipe-step-fields').hidden = !custom;
+  for (const n of ['radius', 'height', 'wind']) $('pipe-' + n + '-field').hidden = custom || interactive;
+  $('pipe-radius-label').textContent = isS ? 'Width (mm)' : 'Radius (mm)';
+  $('pipe-wind-label').textContent = isH ? 'Order' : isS ? 'Passes' : 'Windings';
+  for (const id of ['pipe-radius', 'pipe-slider-radius']) {
     $(id).min = isS ? 2 : 1;
     $(id).max = isS ? 1000 : 500;
   }
-  for (const n of tubeNames) syncSliderFill($('tube-slider-' + n));
+  for (const n of pipeNames) syncSliderFill($('pipe-slider-' + n));
 }
-function setTube(c) {
+function setPipe(c) {
   if (c.type === "interactive") {
     interactivePoints = structuredClone(c.points || defaultInteractivePoints());
     interactiveTargetLength = c.target_length ?? FluixerInteractive.length(interactivePoints);
     interactivePins = c.pins.slice();
     interactiveStiffness = c.stiffness;
   }
-  tubeCenter = c.center ? c.center.slice() : null;
+  pipeCenter = c.center ? c.center.slice() : null;
   if (c.type === 'custom-step') {
-    tubeStepSource = c.source;
-    tubeStepReverse = !!c.reverse;
-    $('tube-step-reverse').ariaPressed = String(tubeStepReverse);
+    pipeStepSource = c.source;
+    pipeStepReverse = !!c.reverse;
+    $('pipe-step-reverse').ariaPressed = String(pipeStepReverse);
   }
   initialPlacement = clonePlane(c.initial_placement || defaultPlacement(c));
   placement = clonePlane(c.placement || initialPlacement);
   planeVisible = !!c.placement;
   $('plane-toggle').ariaPressed = String(planeVisible);
-  $('mapping-type').value = 'projection';
-  tubeKind = c.type || 'cylinder';
-  $('tube-type').value = tubeKind;
-  tubeLabels();
-  for (const n of tubeNames) {
-    const value = n === 'radius' && tubeKind !== 'cylinder' ? c[n] * 2 : c[n];
-    $('tube-' + n).value = value;
-    $('tube-slider-' + n).value = value;
+  pipeKind = c.type || 'cylinder';
+  $('pipe-type').value = pipeKind;
+  pipeLabels();
+  for (const n of pipeNames) {
+    const value = n === 'radius' && pipeKind !== 'cylinder' ? c[n] * 2 : c[n];
+    $('pipe-' + n).value = value;
+    $('pipe-slider-' + n).value = value;
   }
-  tubeLabels();
+  pipeLabels();
   syncRenderControls();
 }
-$('mapping-type').addEventListener('change', loadDisplay);
-$('tube-type').addEventListener('change', () => {
+$('pipe-type').addEventListener('change', () => {
   spatialStroke = null;
-  const next = $('tube-type').value;
+  const next = $('pipe-type').value;
   cancelInteractiveDrag();
-  if (next !== tubeKind) {
-    ++tubeStepReadId;
+  if (next !== pipeKind) {
+    ++pipeStepReadId;
     planeDrag = null;
   }
-  if (next !== tubeKind) tubeCenter = null;
-  tubeLabels();
-  if (next !== tubeKind) {
-    const input = $('tube-radius'),
+  if (next !== pipeKind) pipeCenter = null;
+  pipeLabels();
+  if (next !== pipeKind) {
+    const input = $('pipe-radius'),
       v = Number(input.value);
-    input.value = tubeKind === 'cylinder' ? v * 2 : next === 'cylinder' ? v / 2 : v;
-    if (next === 'hilbert' || tubeKind === 'hilbert')
-      for (const id of ['tube-wind', 'tube-slider-wind']) $(id).value = next === 'hilbert' ? 3 : 16;
-    $('tube-slider-radius').value = input.value;
-    tubeKind = next;
+    input.value = pipeKind === 'cylinder' ? v * 2 : next === 'cylinder' ? v / 2 : v;
+    if (next === 'hilbert' || pipeKind === 'hilbert')
+      for (const id of ['pipe-wind', 'pipe-slider-wind']) $(id).value = next === 'hilbert' ? 3 : 16;
+    $('pipe-slider-radius').value = input.value;
+    pipeKind = next;
   }
-  tubeLabels();
+  pipeLabels();
   loadDisplay();
 });
-function tubeAvailability() {
+function pipeAvailability() {
   syncRenderControls();
-  $('mapping-type').disabled = projectBusy;
-  for (const n of tubeNames)
-    for (const prefix of ['tube-', 'tube-slider-'])
+  for (const n of pipeNames)
+    for (const prefix of ['pipe-', 'pipe-slider-'])
       $(prefix + n).disabled =
-        projectBusy || (['custom-step', 'interactive'].includes($('tube-type').value) && n !== 'diameter');
+        projectBusy || (['custom-step', 'interactive'].includes($('pipe-type').value) && n !== 'diameter');
 }
-setTube(DEFAULT_TUBE);
-for (const n of tubeNames) {
-  $('tube-' + n).addEventListener('input', () => {
-    const v = Number($('tube-' + n).value);
-    if (Number.isFinite(v) && $('tube-' + n).value !== '') {
-      $('tube-slider-' + n).value = v;
-      syncSliderFill($('tube-slider-' + n));
+setPipe(DEFAULT_PIPE);
+for (const n of pipeNames) {
+  $('pipe-' + n).addEventListener('input', () => {
+    const v = Number($('pipe-' + n).value);
+    if (Number.isFinite(v) && $('pipe-' + n).value !== '') {
+      $('pipe-slider-' + n).value = v;
+      syncSliderFill($('pipe-slider-' + n));
     }
   });
-  $('tube-' + n).addEventListener('change', loadDisplay);
-  $('tube-slider-' + n).addEventListener('input', () => {
-    $('tube-' + n).value = $('tube-slider-' + n).value;
-    syncSliderFill($('tube-slider-' + n));
+  $('pipe-' + n).addEventListener('change', loadDisplay);
+  $('pipe-slider-' + n).addEventListener('input', () => {
+    $('pipe-' + n).value = $('pipe-slider-' + n).value;
+    syncSliderFill($('pipe-slider-' + n));
     loadDisplay();
   });
   // Range input fires for dragging and keyboard edits; change would repeat the final request.
 }
-$('tube-reset').addEventListener('click', () => {
+$('pipe-reset').addEventListener('click', () => {
   cancelInteractiveDrag();
-  const csvDiameter = importedCsv ? Number($('tube-diameter').value) : null;
+  const csvDiameter = importedCsv ? Number($('pipe-diameter').value) : null;
   if (!importedCsv) innerDiameter = 2;
-  const type = $('tube-type').value;
+  const type = $('pipe-type').value;
   if (type === 'interactive') {
-    interactivePoints = defaultInteractivePoints(); interactiveTargetLength = 80; interactivePins = []; interactiveStiffness = .2; tubeCenter = null; syncInteractiveControls();
+    interactivePoints = defaultInteractivePoints(); interactiveTargetLength = 80; interactivePins = []; interactiveStiffness = .2; pipeCenter = null; syncInteractiveControls();
     loadDisplay(); return;
   }
   if (type === 'custom-step') {
-    tubeStepReverse = false;
-    $('tube-step-reverse').ariaPressed = 'false';
-    $('tube-diameter').value = csvDiameter ?? 4;
-    $('tube-slider-diameter').value = csvDiameter ?? 4;
+    pipeStepReverse = false;
+    $('pipe-step-reverse').ariaPressed = 'false';
+    $('pipe-diameter').value = csvDiameter ?? 4;
+    $('pipe-slider-diameter').value = csvDiameter ?? 4;
     loadDisplay();
     return;
   }
@@ -916,10 +959,10 @@ $('tube-reset').addEventListener('click', () => {
     savedInitial = clonePlane(initialPlacement),
     visible = planeVisible,
     center =
-      tubeCenter ||
+      pipeCenter ||
       (display?.bounds ? display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2) : null);
-  setTube({
-    ...DEFAULT_TUBE,
+  setPipe({
+    ...DEFAULT_PIPE,
     ...(csvDiameter !== null ? { diameter: csvDiameter } : {}),
     placement: savedPlane,
     initial_placement: savedInitial,
@@ -931,41 +974,41 @@ $('tube-reset').addEventListener('click', () => {
   syncPlaneTools();
   loadDisplay();
 });
-$('tube-step-open').addEventListener('click', () => $('tube-step-file').click());
-$('tube-step-reverse').addEventListener('click', () => {
-  tubeStepReverse = !tubeStepReverse;
-  $('tube-step-reverse').ariaPressed = String(tubeStepReverse);
+$('pipe-step-open').addEventListener('click', () => $('pipe-step-file').click());
+$('pipe-step-reverse').addEventListener('click', () => {
+  pipeStepReverse = !pipeStepReverse;
+  $('pipe-step-reverse').ariaPressed = String(pipeStepReverse);
   loadDisplay();
 });
-$('tube-step-file').addEventListener('change', async () => {
-  const file = $('tube-step-file').files?.[0],
-    id = ++tubeStepReadId;
+$('pipe-step-file').addEventListener('change', async () => {
+  const file = $('pipe-step-file').files?.[0],
+    id = ++pipeStepReadId;
   if (!file) return;
-  $('tube-step-file').value = '';
+  $('pipe-step-file').value = '';
   status('');
   try {
     if (!/\.(stp|step)$/i.test(file.name) || file.size > 2097152)
       throw Error('Choose an STP / STEP file up to 2 MB');
     const source = await file.text(),
-      response = await fetch('/api/tube-step', {
+      response = await fetch('/api/pipe-step', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source }),
       }),
       data = await response.json();
     if (!response.ok) throw Error(data.error || 'Centerline validation failed');
-    if (id !== tubeStepReadId || $('tube-type').value !== 'custom-step') return;
-    tubeStepSource = source;
-    tubeStepReverse = false;
-    tubeCenter = null;
-    $('tube-step-reverse').ariaPressed = 'false';
+    if (id !== pipeStepReadId || $('pipe-type').value !== 'custom-step') return;
+    pipeStepSource = source;
+    pipeStepReverse = false;
+    pipeCenter = null;
+    $('pipe-step-reverse').ariaPressed = 'false';
     await loadDisplay();
   } catch (error) {
-    if (id === tubeStepReadId && $('tube-type').value === 'custom-step') status(error.message, true);
+    if (id === pipeStepReadId && $('pipe-type').value === 'custom-step') status(error.message, true);
   }
 });
-function validatePatternBounds(shape, tube = DEFAULT_TUBE) {
-  tube = patternFrame(tube);
+function validatePatternBounds(shape, pipe = DEFAULT_PIPE) {
+  pipe = patternFrame(pipe);
   if (
     !shape ||
     typeof shape !== 'object' ||
@@ -981,8 +1024,8 @@ function validatePatternBounds(shape, tube = DEFAULT_TUBE) {
     shape.height <= 0 ||
     shape.x < 0 ||
     shape.z < 0 ||
-    shape.x + shape.width > 2 * tube.radius ||
-    shape.z + shape.height > tube.height
+    shape.x + shape.width > 2 * pipe.radius ||
+    shape.z + shape.height > pipe.height
   )
     throw Error('Pattern exceeds its frame bounds. Adjust its size or position');
   return shape;
@@ -1001,7 +1044,7 @@ function syncBrushMode(openPlane=false) {
   $('brush-mode-fields').hidden=$('pattern-type').value!=='brush';
   if(openPlane&&patternType()==='brush') {
     planeVisible=true;
-    placement=placement||defaultPlacement(selectedTube(),display?.bounds);
+    placement=placement||defaultPlacement(selectedPipe(),display?.bounds);
     if(!initialPlacement)initialPlacement=clonePlane(placement);
     $('plane-tool').value='';
   }
@@ -1012,24 +1055,24 @@ function selectedPattern() {
   if (patternType() === 'spatial-brush')
     return { type: 'spatial-brush', windows: spatialWindows.map((w) => w.slice()) };
   if (patternType() === 'image')
-    return imageActive ? validateImagePattern(imageActive, selectedTube()) : { type: 'empty' };
+    return imageActive ? validateImagePattern(imageActive, selectedPipe()) : { type: 'empty' };
   if (patternType() === 'brush') {
     if (!brushActive) {
-      const tube = patternFrame(selectedTube());
+      const pipe = patternFrame(selectedPipe());
       brushActive = {
         type: 'brush',
         source: brushSource(),
-        width: 2*tube.radius,
-        height: tube.height,
+        width: 2*pipe.radius,
+        height: pipe.height,
         x: 0,
         z: 0,
       };
     }
-    return validateBrushPattern(brushActive, selectedTube());
+    return validateBrushPattern(brushActive, selectedPipe());
   }
   if (patternType() === 'step') {
     if (!stepActive) return { type: 'empty' };
-    return validateStepPattern(stepActive, selectedTube());
+    return validateStepPattern(stepActive, selectedPipe());
   }
   return { type: 'captured-s' };
 }
@@ -1040,9 +1083,9 @@ let imageActive = null,
   imagePhotoSource = null,
   imageReadId = 0,
   imageProcessId = 0;
-function validateImagePattern(shape, tube) {
+function validateImagePattern(shape, pipe) {
   if (!shape || shape.type !== 'image') throw Error('Invalid image pattern');
-  validateBrushPattern({ ...shape, type: 'brush' }, tube);
+  validateBrushPattern({ ...shape, type: 'brush' }, pipe);
   return shape;
 }
 function sameImage(a, b) {
@@ -1124,7 +1167,7 @@ async function processImage() {
     for (let y = 0; y < raster.height; y++)
       for (let x = 0; x < raster.width; x++)
         rows[y + oy][x + ox] = String(bits[y * raster.width + x]);
-    const frame = patternFrame(selectedTube()),
+    const frame = patternFrame(selectedPipe()),
       side = Math.min(frame.radius * 2, frame.height) * 0.8;
     imageActive = {
       type: 'image',
@@ -1205,7 +1248,7 @@ let stepDraft = null,
   stepBusy = false;
 const stepControlIds = ['step-open', 'step-apply', 'step-clear'];
 let stepPlacement = { width: 50, height: 50, x: 15, z: 12.5 };
-function validateStepPattern(shape, tube = DEFAULT_TUBE) {
+function validateStepPattern(shape, pipe = DEFAULT_PIPE) {
   if (
     !shape ||
     Object.keys(shape).sort().join('|') !== 'height|source|type|width|x|z' ||
@@ -1216,7 +1259,7 @@ function validateStepPattern(shape, tube = DEFAULT_TUBE) {
     throw Error('Invalid STEP project parameters');
   validatePatternBounds(
     { width: shape.width, height: shape.height, x: shape.x, z: shape.z },
-    tube,
+    pipe,
   );
   return shape;
 }
@@ -1231,17 +1274,13 @@ function sameStep(a, b) {
 function uncompensatedPreviewCurve() {
   return { amplitude: 0, x: [0, 1 / 3, 2 / 3, 1], y: [0, 0, 0, 0] };
 }
-function previewCurveFor(curve, tube) {
-  return compensatedPreview && ['cylinder', 's-curve'].includes(tube.type || 'cylinder')
+function previewCurveFor(curve, pipe) {
+  return compensatedPreview && ['cylinder', 's-curve'].includes(pipe.type || 'cylinder')
     ? curve : uncompensatedPreviewCurve();
 }
-function fetchDisplay(shape, tube, curve = uncompensatedPreviewCurve()) {
-  if(calculationDisabled)return fetch('/api/display',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({cylinder:tube,geometry_only:true}),
-  });
+function fetchDisplay(shape, pipe, curve = uncompensatedPreviewCurve()) {
   if (
-    ['custom-step', 'interactive'].includes(tube.type) ||
+    ['custom-step', 'interactive'].includes(pipe.type) ||
     ['step', 'brush', 'image', 'empty', 'spatial-brush'].includes(shape.type)
   )
     return fetch('/api/display', {
@@ -1250,10 +1289,10 @@ function fetchDisplay(shape, tube, curve = uncompensatedPreviewCurve()) {
       body: JSON.stringify({
         pattern: shape,
         compensation: curve,
-        cylinder: tube,
+        cylinder: pipe,
       }),
     });
-  return fetch(displayURL(curve, tube));
+  return fetch(displayURL(curve, pipe));
 }
 function clearStepResult() {
   if (patternType() !== 'step') return;
@@ -1343,19 +1382,19 @@ $('step-file').addEventListener('change', async () => {
     if (!response.ok) throw Error(data.error || 'STEP validation failed');
     if (token !== stepReadId) return;
     stepDraft = { source, parsed: data };
-    const tube = patternFrame(selectedTube()),
+    const pipe = patternFrame(selectedPipe()),
       ratio = data.view_box[2] / data.view_box[3];
-    let width = 2 * tube.radius * 0.7,
+    let width = 2 * pipe.radius * 0.7,
       height = width / ratio;
-    if (height > tube.height * 0.7) {
-      height = tube.height * 0.7;
+    if (height > pipe.height * 0.7) {
+      height = pipe.height * 0.7;
       width = height * ratio;
     }
     stepPlacement = {
       width,
       height,
-      x: (2 * tube.radius - width) / 2,
-      z: (tube.height - height) / 2,
+      x: (2 * pipe.radius - width) / 2,
+      z: (pipe.height - height) / 2,
     };
     drawStepDraft();
     $('step-apply').disabled = false;
@@ -1390,9 +1429,9 @@ $('step-apply').addEventListener('click', () => {
   try {
     stepActive = validateStepPattern(
       { type: 'step', source: stepDraft.source, ...stepDimensions() },
-      selectedTube(),
+      selectedPipe(),
     );
-    $('step-status').textContent = 'STEP confirmed. Generating tube segments…';
+    $('step-status').textContent = 'STEP confirmed. Generating pipe segments…';
     loadDisplay();
   } catch (e) {
     $('step-status').textContent = 'Could not apply: ' + e.message;
@@ -1410,7 +1449,7 @@ let brushPixels = new Uint8Array(BRUSH_SIZE * BRUSH_SIZE),
 const brushCanvas = document.createElement('canvas');
 brushCanvas.width=brushCanvas.height=256;
 let brushPreviewTimer=null;
-function validateBrushPattern(shape, tube) {
+function validateBrushPattern(shape, pipe) {
   if (
     !shape ||
     Object.keys(shape).sort().join('|') !== 'height|source|type|width|x|z' ||
@@ -1431,7 +1470,7 @@ function validateBrushPattern(shape, tube) {
     throw Error('Brush canvas is invalid or empty');
   validatePatternBounds(
     { width: shape.width, height: shape.height, x: shape.x, z: shape.z },
-    tube,
+    pipe,
   );
   return shape;
 }
@@ -1478,8 +1517,8 @@ function flushBrushPreview() {
   if (projectBusy || patternType() !== 'brush') return;
   $('brush-status').textContent = '';
   try {
-    const tube = patternFrame(selectedTube());
-    const placement = brushActive || {width:2*tube.radius,height:tube.height,x:0,z:0};
+    const pipe = patternFrame(selectedPipe());
+    const placement = brushActive || {width:2*pipe.radius,height:pipe.height,x:0,z:0};
     brushActive = validateBrushPattern(
       {
         type: 'brush',
@@ -1489,7 +1528,7 @@ function flushBrushPreview() {
         x: placement.x,
         z: placement.z,
       },
-      tube,
+      pipe,
     );
     loadDisplay();
   } catch (e) {
@@ -1549,7 +1588,7 @@ function finishBrush(cancel = false, silent = false) {
   if (!silent) {clearTimeout(brushPreviewTimer);brushPreviewTimer=null;flushBrushPreview();}
 }
 canvas.addEventListener('pointerdown',e=>{
-  if(patternType()!=='brush'||brushErase===null||!planeVisible||calculationDisabled||e.button!==0||e.isPrimary===false||brushStroke||projectBusy||exporting||importedCsv)return;
+  if(patternType()!=='brush'||brushErase===null||!planeVisible||e.button!==0||e.isPrimary===false||brushStroke||projectBusy||exporting||importedCsv)return;
   const mapping=brushPlaneMapping(),point=brushPoint(e,mapping);if(!point)return;
   e.preventDefault();e.stopImmediatePropagation();
   brushStroke={id:e.pointerId,before:brushPixels.slice(),point,mapping,
@@ -1572,6 +1611,7 @@ canvas.addEventListener('pointerup',e=>{
 for(const name of ['pointercancel','lostpointercapture'])canvas.addEventListener(name,e=>{if(brushStroke?.id===e.pointerId)finishBrush(true);},true);
 window.addEventListener('blur',()=>finishBrush(true));
 function syncBrushTool() {
+  $('brush-size-control').hidden=brushErase===null;
   $('brush-pen').ariaPressed=String(brushErase===false);
   $('brush-eraser').ariaPressed=String(brushErase===true);
   if(patternType()==='brush')canvas.style.cursor=brushErase===null?'':'crosshair';
@@ -1882,35 +1922,35 @@ curveCanvas.addEventListener('click', (e) => {
   setCurve(c);
   loadDisplay();
 });
-function displayURL(curve = DEFAULT_CURVE, tube = DEFAULT_TUBE) {
-  const url = '/api/display?cylinder=' + encodeURIComponent(JSON.stringify(tube));
+function displayURL(curve = DEFAULT_CURVE, pipe = DEFAULT_PIPE) {
+  const url = '/api/display?cylinder=' + encodeURIComponent(JSON.stringify(pipe));
   return url + '&compensation=' + encodeURIComponent(JSON.stringify(curve));
 }
-function patternFrame(c = DEFAULT_TUBE) {
+function patternFrame(c = DEFAULT_PIPE) {
   return c.placement?.size
     ? { ...c, radius: c.placement.size[0] / 2, height: c.placement.size[1] }
     : c;
 }
-function followTubeResize() {
+function followPipeResize() {
   let next;
   try {
-    next = selectedTube();
+    next = selectedPipe();
   } catch {
     return;
   }
   if (
-    next.type !== 'interactive' && !tubeCenter &&
+    next.type !== 'interactive' && !pipeCenter &&
     display?.bounds &&
     (next.type || 'cylinder') === (display.cylinder.type || 'cylinder') &&
-    tubeNames.some((n) => next[n] !== display.cylinder[n])
+    pipeNames.some((n) => next[n] !== display.cylinder[n])
   )
-    tubeCenter = display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2);
+    pipeCenter = display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2);
 }
 function loadDisplay() {
   clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
   cancelInteractiveDrag(false);
   if (csvReading) return;
-  if (!editHistory?.restoring) followTubeResize();
+  if (!editHistory?.restoring) followPipeResize();
   commitEditHistory();
   ++requestId;
   if (previewLoading) {
@@ -1934,7 +1974,7 @@ async function renderDisplay(current) {
   // Keep the CSV sequence and current progress when changing its preview path.
   if (importedCsv) stopAnimation(false);
   else resetAnimation(false);
-  tubeAvailability();
+  pipeAvailability();
   $('spatial-fields').hidden = patternType() !== 'spatial-brush';
   $('image-fields').hidden = patternType() !== 'image';
   $('brush-fields').hidden = patternType() !== 'brush';
@@ -1948,11 +1988,11 @@ async function renderDisplay(current) {
   $('export-status').textContent = '';
   for (const id of ['total', 'current-output-value', 'count']) $(id).textContent = '—';
   try {
-    const requestedPattern = calculationDisabled ? {type:'empty'} : selectedPattern(),
-      requestedCurve = calculationDisabled ? DEFAULT_CURVE : selectedCurve(),
-      requestedTube = selectedTube();
-    const previewCurve = previewCurveFor(requestedCurve, requestedTube);
-    const response = await fetchDisplay(requestedPattern, requestedTube, previewCurve);
+    const requestedPattern = selectedPattern(),
+      requestedCurve = selectedCurve(),
+      requestedPipe = selectedPipe();
+    const previewCurve = previewCurveFor(requestedCurve, requestedPipe);
+    const response = await fetchDisplay(requestedPattern, requestedPipe, previewCurve);
     const data = await response.json();
     if (!response.ok) throw Error(data.error || 'Calculation failed');
     if (current !== requestId) return;
@@ -1962,18 +2002,18 @@ async function renderDisplay(current) {
       throw Error('Brush result mismatch');
     if (requestedPattern.type === 'step' && !sameStep(requestedPattern, data.pattern_config))
       throw Error('STEP result does not match the current pattern');
-    if (!data.geometry_only && !sameCurve(previewCurve, data.compensation))
+    if (!sameCurve(previewCurve, data.compensation))
       throw Error('Compensation parameter response mismatch. Restart the local server');
-    if (!sameTube(requestedTube, data.cylinder || DEFAULT_TUBE))
-      throw Error('Tube parameter response mismatch. Restart the server');
+    if (!samePipe(requestedPipe, data.cylinder || DEFAULT_PIPE))
+      throw Error('Pipe parameter response mismatch. Restart the server');
     if (
       requestedPattern.type === 'spatial-brush' &&
       JSON.stringify(requestedPattern) !== JSON.stringify(data.pattern_config)
     )
       throw Error('Spatial brush result mismatch');
-    if (!calculationDisabled && importedCsv?.standard) {
+    if (importedCsv?.standard) {
       const previous = importedCsv;
-      const standard = await fetchStandardPattern(requestedCurve, requestedTube);
+      const standard = await fetchStandardPattern(requestedCurve, requestedPipe);
       if (importedCsv !== previous || current !== requestId) return;
       importedCsv = standardPreviewSequence(standard);
       $('calibration-standard-status').textContent = `${standard.count} liquid segments · 100 steps each`;
@@ -2090,7 +2130,7 @@ for(const id of ['interactive-radius','interactive-radius-value']) $(id).addEven
 });
 syncSliderFill($('interactive-radius'));
 function syncViewEditTools() {
-  const interactive=$('tube-type').value==='interactive';
+  const interactive=$('pipe-type').value==='interactive';
   const spatial=patternType()==='spatial-brush',brush=patternType()==='brush';
   $('brush-mode-fields').hidden=$('pattern-type').value!=='brush';
   $('brush-view-tools').hidden=!brush;
@@ -2100,7 +2140,7 @@ function syncViewEditTools() {
 }
 function syncInteractiveControls() {
   syncViewEditTools();
-  const active=$('tube-type').value==='interactive';
+  const active=$('pipe-type').value==='interactive';
   if(!active)interactiveTool=null;
   if(!active || !interactivePins.includes(selectedInteractivePin))selectedInteractivePin=null;
   $('interactive-pin').hidden=!active;
@@ -2119,7 +2159,7 @@ function syncInteractiveControls() {
   syncSliderFill($('interactive-length'));
 }
 function drawInteractivePins(rect) {
-  if($('tube-type').value!=='interactive')return;
+  if($('pipe-type').value!=='interactive')return;
   const projectPoint=createProjector(rect.width,rect.height);
   ctx.save();ctx.globalAlpha=1;ctx.lineWidth=1.7;
   ctx.strokeStyle=uiColor('accent-text','#C2141C');ctx.fillStyle=uiColor('surface','#FFFFFF');
@@ -2179,7 +2219,7 @@ for(const id of ['interactive-length','interactive-length-value']) {
     try {
       const next=FluixerInteractive.resize(interactiveLengthEdit||interactivePoints,value,interactivePins);
       validateInteractivePoints(next);
-      if(FluixerInteractive.collides(next,Number($('tube-diameter').value)))throw Error('The end extension meets another part of the tube. Move the end before extending it.');
+      if(FluixerInteractive.collides(next,Number($('pipe-diameter').value)))throw Error('The end extension meets another part of the pipe. Move the end before extending it.');
       interactivePoints=next;interactiveTargetLength=FluixerInteractive.length(next);
       syncInteractiveControls();loadDisplay();
     }catch(error){syncInteractiveControls();status(error.message,true);}
@@ -2187,7 +2227,7 @@ for(const id of ['interactive-length','interactive-length-value']) {
   $(id).addEventListener('change',()=>{interactiveLengthEdit=null;syncInteractiveControls();});
 }
 for(const tool of ['pin','tension','slack']) $('interactive-'+tool).addEventListener('click',()=>{
-  cancelInteractiveDrag();selectSidebarTab('tube');interactiveTool=interactiveTool===tool?null:tool;
+  cancelInteractiveDrag();selectSidebarTab('pipe');interactiveTool=interactiveTool===tool?null:tool;
   syncInteractiveControls();draw();
 });
 for(const id of ['plane-toggle','tool-gumball','tool-direction','plane-reset']) $(id).addEventListener('click',()=>{
@@ -2198,14 +2238,14 @@ function startInteractiveSolve(solver,kind,originalStiffness=interactiveStiffnes
   const rect=canvas.getBoundingClientRect();
   stopAnimation();animationProgress=1;
   interactiveDrag={id:null,kind,originalStiffness,original:structuredClone(interactivePoints),originalTarget:interactiveTargetLength,
-    solver,collision:true,diameter:Number($('tube-diameter').value),released:true,
+    solver,collision:true,diameter:Number($('pipe-diameter').value),released:true,
     project:createProjector(rect.width,rect.height),settled:0,releaseSteps:0,
     lastValid:structuredClone(interactivePoints)};
   interactiveDrag.frame=requestAnimationFrame(advanceInteractive);draw();
 }
 function interactiveSolverOptions(u=0) {
   return {u,pins:interactivePins.slice(),target:interactiveTargetLength,stiffness:interactiveStiffness,
-    collision:true,diameter:Number($('tube-diameter').value)};
+    collision:true,diameter:Number($('pipe-diameter').value)};
 }
 for(const id of ['interactive-stiffness','interactive-stiffness-value']) {
   $(id).addEventListener(id==='interactive-stiffness'?'input':'change',()=>{
@@ -2246,7 +2286,7 @@ function editInteractivePin(x,y,best,projectPoint,remove=false) {
 }
 
 canvas.addEventListener('pointerdown',e=>{
-  if(e.button!==0 || !e.isPrimary || $('tube-type').value!=='interactive' || $('panel-tube').hidden ||
+  if(e.button!==0 || !e.isPrimary || $('pipe-type').value!=='interactive' || $('panel-pipe').hidden ||
       projectBusy || csvReading || exporting || !display || (interactiveDrag&&!interactiveDrag.released)) return;
   if(interactiveDrag?.released)acceptInteractiveDrag();
   const rect=canvas.getBoundingClientRect(), projectPoint=createProjector(rect.width,rect.height);
@@ -2292,7 +2332,7 @@ canvas.addEventListener('pointerdown',e=>{
   interactiveDrag={id:e.pointerId,x:e.clientX,y:e.clientY,original:structuredClone(interactivePoints),
     u:best.u,pins:interactivePins.slice(),stiffness:interactiveStiffness,originalTarget:interactiveTargetLength,
     target:interactiveTargetLength,
-    collision:true,diameter:Number($('tube-diameter').value),
+    collision:true,diameter:Number($('pipe-diameter').value),
     basis:cameraBasis(),scale:viewScale(rect.width,rect.height),project:projectPoint};
   const d=interactiveDrag;
   d.grabStep=2/d.scale; // Two CSS pixels per solver step at any view scale.
@@ -2449,9 +2489,8 @@ function downloadBlob(blob, filename) {
 
 async function requestOutputCsv(compensated) {
   if(interactivePreviewDirty)throw Error('Wait for the updated curve preview before output');
-  if(calculationDisabled || display?.geometry_only)throw Error('Enable calculation before output');
     const data = {
-      cylinder: display.cylinder || DEFAULT_TUBE,
+      cylinder: display.cylinder || DEFAULT_PIPE,
       compensation: compensated ? selectedCurve() : uncompensatedPreviewCurve(),
       pattern: display.pattern_config || { type: 'captured-s' },
       pre_add: selectedPreAdd(),
@@ -2515,21 +2554,21 @@ function validateProject(value) {
     throw Error('Unsupported project format or version. Only schema 10 is supported');
   keys(value, ['format', 'schema_version', 'pattern', 'compensation', 'cylinder', 'machine', 'view']);
   validateCurve(value.compensation);
-  const tube = validateTube(value.cylinder);
-  keys(tube, [
-    ...tubeNames, 'type', 'mapping', 'placement', 'initial_placement',
-    ...(Object.hasOwn(tube, 'center') ? ['center'] : []),
-    ...(tube.type === 'custom-step' ? ['source', 'reverse'] : []),
-    ...(tube.type === 'interactive' ? ['points', 'target_length', 'avoid_collisions', 'pins', 'stiffness'] : []),
+  const pipe = validatePipe(value.cylinder);
+  keys(pipe, [
+    ...pipeNames, 'type', 'mapping', 'placement', 'initial_placement',
+    ...(Object.hasOwn(pipe, 'center') ? ['center'] : []),
+    ...(pipe.type === 'custom-step' ? ['source', 'reverse'] : []),
+    ...(pipe.type === 'interactive' ? ['points', 'target_length', 'avoid_collisions', 'pins', 'stiffness'] : []),
   ]);
-  if (!['cylinder', 's-curve', 'hilbert', 'custom-step', 'interactive'].includes(tube.type) ||
-      tube.mapping !== 'projection')
-    throw Error('Invalid project tube type or mapping');
+  if (!['cylinder', 's-curve', 'hilbert', 'custom-step', 'interactive'].includes(pipe.type) ||
+      pipe.mapping !== 'projection')
+    throw Error('Invalid project pipe type or mapping');
   const vector = (v, length, min, max) =>
     Array.isArray(v) && v.length === length &&
     v.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max);
   for (const name of ['placement', 'initial_placement']) {
-    const p = tube[name];
+    const p = pipe[name];
     keys(p, ['position', 'rotation', 'scale', 'direction', 'depth', 'size']);
     if (!vector(p.position, 3, -10000, 10000) ||
         !vector(p.rotation, 3, -10000, 10000) ||
@@ -2551,11 +2590,11 @@ function validateProject(value) {
     case 'step':
     case 'image':
       if (pattern.source === null) keys(pattern, ['type', 'source']);
-      else if (pattern.type === 'step') validateStepPattern(pattern, tube);
-      else validateImagePattern(pattern, tube);
+      else if (pattern.type === 'step') validateStepPattern(pattern, pipe);
+      else validateImagePattern(pattern, pipe);
       break;
     case 'brush':
-      validateBrushPattern(pattern, tube);
+      validateBrushPattern(pattern, pipe);
       break;
     case 'spatial-brush':
       validateSpatialPattern(pattern);
@@ -2579,9 +2618,9 @@ function validateProject(value) {
     throw Error('Invalid pattern plane visibility setting');
   const render = value.view.render;
   keys(render, ['mode', 'inner']);
-  if (!['lines', 'render'].includes(render.mode) ||
-      !Number.isFinite(render.inner) || render.inner <= 0 || render.inner >= tube.diameter)
-    throw Error('Invalid inner or outer tube diameter');
+  if (!['lines', 'render', 'print'].includes(render.mode) ||
+      !Number.isFinite(render.inner) || render.inner <= 0 || render.inner >= pipe.diameter)
+    throw Error('Invalid inner or outer pipe diameter');
   const ranges = {
     yaw: [-Math.PI, Math.PI], pitch: [-1.4, 1.4], zoom: [0.1, 10],
     pan_x: [-1e6, 1e6], pan_y: [-1e6, 1e6],
@@ -2597,16 +2636,16 @@ function validateProject(value) {
 function currentProject() {
   const rect = canvas.getBoundingClientRect();
   const shape = display.pattern_config;
-  const tube = display.cylinder;
+  const pipe = display.cylinder;
   return validateProject({
     format: PROJECT_FORMAT,
     schema_version: PROJECT_SCHEMA_VERSION,
     pattern: shape.type === 'empty' ? { type: patternType(), source: null } : shape,
     compensation: selectedCurve(),
     cylinder: {
-      ...tube,
-      type: tube.type || 'cylinder',
-      mapping: tube.mapping || 'projection',
+      ...pipe,
+      type: pipe.type || 'cylinder',
+      mapping: pipe.mapping || 'projection',
     },
     machine: {
       pre_add: selectedPreAdd(),
@@ -2640,15 +2679,15 @@ function restoreProject(project, data) {
     throw Error('STEP result mismatch');
   if (!sameCurve(previewCurveFor(project.compensation, project.cylinder), data.compensation))
     throw Error('Compensation parameter response mismatch');
-  if (!sameTube(project.cylinder, data.cylinder || DEFAULT_TUBE))
-    throw Error('Tube parameter response mismatch');
+  if (!samePipe(project.cylinder, data.cylinder || DEFAULT_PIPE))
+    throw Error('Pipe parameter response mismatch');
   if (
     project.pattern?.type === 'spatial-brush' &&
     JSON.stringify(project.pattern) !== JSON.stringify(data.pattern_config)
   )
     throw Error('Spatial brush result mismatch');
   if (importedCsv || csvReading) clearCsvPreview();
-  setTube(project.cylinder);
+  setPipe(project.cylinder);
   setCurve(project.compensation);
   endDrag();
   display = data;
@@ -2662,7 +2701,7 @@ function restoreProject(project, data) {
     spatialWindows = shape.windows.map((w) => w.slice());
 
   }
-  tubeAvailability();
+  pipeAvailability();
   $('image-fields').hidden = shape.type !== 'image';
   if (shape.type === 'image') {
     imageReadId++;
@@ -2746,12 +2785,11 @@ $('project-file').addEventListener('change', async () => {
     'image-threshold',
     'image-invert',
     'image-clear',
-    'mapping-type',
-    'tube-type',
+    'pipe-type',
     ...brushControls,
     ...stepControlIds,
-    ...tubeNames.flatMap((n) => ['tube-' + n, 'tube-slider-' + n]),
-    'tube-reset',
+    ...pipeNames.flatMap((n) => ['pipe-' + n, 'pipe-slider-' + n]),
+    'pipe-reset',
     ...curveIds,
     'curve-reset',
     'project-open',
@@ -2806,7 +2844,7 @@ $('project-file').addEventListener('change', async () => {
     syncPlayback();
     for (const id of controls) $(id).disabled = false;
     syncCsvControls();
-    tubeAvailability();
+    pipeAvailability();
     paintBrush();
     $('step-apply').disabled = !stepDraft;
     setExportDisabled(!display || exporting || display.pattern_config.type === 'empty');
@@ -2848,7 +2886,7 @@ function planePoint(x, z) {
 function clonePlane(p) {
   return JSON.parse(JSON.stringify(p));
 }
-function defaultPlacement(c = selectedTube(), bounds = null) {
+function defaultPlacement(c = selectedPipe(), bounds = null) {
   const planar = c.type && c.type !== 'cylinder' && c.type !== 'custom-step';
   const center =
     c.center ||
@@ -3118,10 +3156,10 @@ function syncPlaneTools() {
     ['tool-direction', 'direction'],
   ]) {
     $(id).ariaPressed = String(!!placement && planeVisible && $('plane-tool').value === mode);
-    $(id).disabled = patternType()==='spatial-brush' || calculationDisabled || !placement || !planeVisible || projectBusy || !!importedCsv || csvReading;
+    $(id).disabled = patternType()==='spatial-brush' || !placement || !planeVisible || projectBusy || !!importedCsv || csvReading;
   }
-  $('plane-reset').disabled = patternType()==='spatial-brush' || calculationDisabled || projectBusy || !!importedCsv || csvReading;
-  $('plane-toggle').disabled = patternType()==='spatial-brush' || calculationDisabled || !!importedCsv?.standard;
+  $('plane-reset').disabled = patternType()==='spatial-brush' || projectBusy || !!importedCsv || csvReading;
+  $('plane-toggle').disabled = patternType()==='spatial-brush' || !!importedCsv?.standard;
   $('plane-toggle').ariaPressed = String(patternType()!=='spatial-brush' && !!placement && planeVisible);
 }
 for (const [id, mode] of [
@@ -3152,7 +3190,6 @@ canvas.addEventListener(
   'pointerdown',
   (e) => {
     if (
-      calculationDisabled ||
       patternType() === 'spatial-brush' ||
       e.button !== 0 ||
       !placement ||
@@ -3281,7 +3318,7 @@ function mergeSpatial(windows) {
   }
   return result;
 }
-// A screen-space depth buffer: every pixel belongs only to its frontmost tube.
+// A screen-space depth buffer: every pixel belongs only to its frontmost pipe.
 function spatialHitMap(data, rect, projection, scale) {
   const cell = 2,
     width = Math.ceil(rect.width / cell),
@@ -3329,7 +3366,7 @@ function spatialHitMap(data, rect, projection, scale) {
     pad: cell / scale / data.path_length };
 }
 // Select a foreground layer for the whole brush footprint, not a ray per pixel.
-// Gaps between front tubes must not expose distant tubes to paint or erase.
+// Gaps between front pipes must not expose distant pipes to paint or erase.
 function spatialStamp(x, y, stroke, windows = []) {
   const { map, radius } = stroke;
   stroke.visited ||= new Uint8Array(map.width * map.height);
@@ -3349,7 +3386,7 @@ function spatialStamp(x, y, stroke, windows = []) {
       candidates.push(index);
     }
   }
-  // Allow local surface curvature and tube thickness, independently of zoom.
+  // Allow local surface curvature and pipe thickness, independently of zoom.
   const back = front + Math.max(map.diameter, radius / map.scale);
   for (const index of candidates) {
     if (stroke.visited[index] || map.depths[index] > back) continue;
@@ -3388,6 +3425,7 @@ function scheduleSpatialRefresh() {
   spatialRefresh = requestAnimationFrame(flush);
 }
 function syncSpatialControls() {
+  $('spatial-size-control').hidden=spatialErase===null;
   syncViewEditTools();
   $('spatial-pen').ariaPressed = String(spatialErase===false);
   $('spatial-eraser').ariaPressed = String(spatialErase===true);
@@ -3570,23 +3608,15 @@ for (const key of sidebarTabKeys) {
 selectSidebarTab('pattern');
 
 function setExportDisabled(disabled) {
-  $('export').disabled = disabled || interactivePreviewDirty || calculationDisabled || !!display?.geometry_only;
-  $('export-original').disabled = disabled || interactivePreviewDirty || calculationDisabled || !!display?.geometry_only;
+  $('export').disabled = disabled || interactivePreviewDirty;
+  $('export-original').disabled = disabled || interactivePreviewDirty;
 }
 function syncCompensationPreview() {
   const standard = !!importedCsv?.standard;
-  const supported = ['cylinder', 's-curve'].includes($('tube-type').value);
+  const supported = ['cylinder', 's-curve'].includes($('pipe-type').value);
   $('view-compensated').setAttribute('aria-pressed', String(standard || (supported && compensatedPreview)));
-  $('view-compensated').disabled = calculationDisabled || !supported || !!importedCsv || csvReading || projectBusy || exporting || previewLoading;
+  $('view-compensated').disabled = !supported || !!importedCsv || csvReading || projectBusy || exporting || previewLoading;
 }
-$('view-no-calculation').addEventListener('click',()=>{
-  calculationDisabled=!calculationDisabled;
-  $('view-no-calculation').ariaPressed=String(calculationDisabled);
-  stopAnimation(false);animationProgress=1;
-  document.querySelector('.legend').hidden=calculationDisabled;
-  syncCompensationPreview();syncRenderControls();syncPlaneTools();syncPlayback();setExportDisabled(true);
-  loadDisplay();
-});
 $('view-compensated').addEventListener('click', () => {
   if ($('view-compensated').disabled) return;
   compensatedPreview = !compensatedPreview;
@@ -3606,7 +3636,7 @@ function syncCsvControls() {
     group.disabled = locked && !editableCompensation;
     group.inert = group.disabled;
   }
-  for (const group of document.querySelectorAll('.csv-tube-controls')) {
+  for (const group of document.querySelectorAll('.csv-pipe-controls')) {
     group.disabled = projectBusy || csvReading || !!importedCsv?.standard;
     group.inert = group.disabled;
   }
@@ -3614,7 +3644,7 @@ function syncCsvControls() {
   const busy = projectBusy || previewLoading || exporting || csvReading;
   $('csv-import').disabled = !display || busy || !!importedCsv?.standard;
   const standard = !!importedCsv?.standard;
-  const standardUnavailable = calculationDisabled || busy || !['cylinder', 's-curve'].includes($('tube-type').value) || (!!importedCsv && !standard);
+  const standardUnavailable = busy || !['cylinder', 's-curve'].includes($('pipe-type').value) || (!!importedCsv && !standard);
   $('calibration-standard').disabled = standardUnavailable;
   $('csv-preview-clear').hidden = !importedCsv;
   $('csv-preview-clear').disabled = busy;
@@ -3629,7 +3659,6 @@ function csvPreviewMetrics() {
   syncCurrentOutput();
   if (!display) return;
   $('total').textContent = display.path_length.toFixed(2) + ' mm';
-  if(calculationDisabled || display.geometry_only){$('count').textContent='—';return;}
   if (importedCsv) {
     const windows = csvPreviewWindows(importedCsv, display.path_length, 1);
     let count = 0, cursor = 0;
@@ -3700,7 +3729,7 @@ syncCsvControls();
 
 
 FluixerCalibration.init({
-  locked: () => projectBusy || (!!importedCsv && !importedCsv.standard) || csvReading || !['cylinder', 's-curve'].includes($('tube-type').value),
+  locked: () => projectBusy || (!!importedCsv && !importedCsv.standard) || csvReading || !['cylinder', 's-curve'].includes($('pipe-type').value),
   syncSlider: syncSliderFill,
   apply: (curve) => {
     finishCurveDrag(null, true, true);
@@ -3714,7 +3743,7 @@ FluixerCalibration.init({
 
 
 // STANDARD_PREVIEW_START
-async function fetchStandardPattern(compensation = selectedCurve(), cylinder = selectedTube()) {
+async function fetchStandardPattern(compensation = selectedCurve(), cylinder = selectedPipe()) {
   const payload = {
     cylinder,
     compensation,
@@ -3742,8 +3771,8 @@ function standardPreviewSequence(standard) {
 }
 
 async function startCalibPreview() {
-  if (calculationDisabled || !calibPreviewPending || $('panel-calibration').hidden || projectBusy || csvReading || exporting || previewLoading || !display) return;
-  if (!['cylinder', 's-curve'].includes($('tube-type').value)) return;
+  if (!calibPreviewPending || $('panel-calibration').hidden || projectBusy || csvReading || exporting || previewLoading || !display) return;
+  if (!['cylinder', 's-curve'].includes($('pipe-type').value)) return;
   calibPreviewPending = false;
   calibPreviewReading = true;
   const token = ++csvReadId, sourceDisplay = display, sourceRequest = requestId;
@@ -3752,7 +3781,7 @@ async function startCalibPreview() {
   syncPlayback();
   try {
     const standard = await fetchStandardPattern();
-    if (calculationDisabled || token !== csvReadId || $('panel-calibration').hidden || projectBusy) return;
+    if (token !== csvReadId || $('panel-calibration').hidden || projectBusy) return;
     if (sourceDisplay !== display || sourceRequest !== requestId) {
       calibPreviewPending = true;
       return;
@@ -3777,7 +3806,7 @@ async function startCalibPreview() {
 
 $('calibration-standard').addEventListener('click', async () => {
   if (projectBusy || (importedCsv && !importedCsv.standard) || csvReading || exporting || previewLoading ||
-      !['cylinder', 's-curve'].includes($('tube-type').value)) return;
+      !['cylinder', 's-curve'].includes($('pipe-type').value)) return;
   exporting = true;
   syncCsvControls();
   $('calibration-standard-status').textContent = '';
@@ -3799,7 +3828,7 @@ $('calibration-standard').addEventListener('click', async () => {
 
 // Model edits have their own snapshots; camera and playback are intentionally absent.
 const editFieldIds = [
-  'pattern-type', 'brush-mode', 'tube-type', 'mapping-type', ...tubeNames.map(n => 'tube-' + n),
+  'pattern-type', 'brush-mode', 'pipe-type', ...pipeNames.map(n => 'pipe-' + n),
   'pre-add', 'length-per-100-steps', 'speed', 'k-gas', 'k-liquid', 'unit',
   'image-mode', 'image-threshold', 'image-invert',
 
@@ -3808,8 +3837,8 @@ function captureEditState() {
   return {
     fields: Object.fromEntries(editFieldIds.map(id => [id, { value: $(id).value, checked: $(id).checked }])),
     curve: { ...structuredClone(curveState), amplitude: $('curve-amplitude').value },
-    center: structuredClone(tubeCenter), placement: clonePlane(placement), initialPlacement: clonePlane(initialPlacement),
-    tubeStepSource, tubeStepReverse, innerDiameter, interactivePoints: structuredClone(interactivePoints), interactiveTargetLength, interactivePins: interactivePins.slice(), interactiveStiffness,
+    center: structuredClone(pipeCenter), placement: clonePlane(placement), initialPlacement: clonePlane(initialPlacement),
+    pipeStepSource, pipeStepReverse, innerDiameter, interactivePoints: structuredClone(interactivePoints), interactiveTargetLength, interactivePins: interactivePins.slice(), interactiveStiffness,
     brushPixels: brushPixels.slice(), brushActive: structuredClone(brushActive),
     spatialWindows: structuredClone(spatialWindows), stepActive: structuredClone(stepActive), stepPlacement: structuredClone(stepPlacement),
     imageActive: structuredClone(imageActive), imageRaster, imagePhoto, imagePhotoSource,
@@ -3823,20 +3852,20 @@ function sameEditState(a, b) {
 }
 function restoreEditState(s) {
   if (interactiveDrag) cancelInteractiveDrag();
-  ++requestId; ++imageReadId; ++imageProcessId; ++stepReadId; ++tubeStepReadId;
+  ++requestId; ++imageReadId; ++imageProcessId; ++stepReadId; ++pipeStepReadId;
   imagePhotoPending = null;
   for (const [id, field] of Object.entries(s.fields)) {
     $(id).value = field.value;
     if (typeof field.checked === 'boolean') $(id).checked = field.checked;
   }
-  tubeKind = $('tube-type').value;
-  tubeCenter = structuredClone(s.center); placement = clonePlane(s.placement); initialPlacement = clonePlane(s.initialPlacement);
+  pipeKind = $('pipe-type').value;
+  pipeCenter = structuredClone(s.center); placement = clonePlane(s.placement); initialPlacement = clonePlane(s.initialPlacement);
   interactivePoints = structuredClone(s.interactivePoints);
   interactiveTargetLength = s.interactiveTargetLength;
   interactivePins = s.interactivePins.slice();
   interactiveStiffness = s.interactiveStiffness;
-  tubeStepSource = s.tubeStepSource; tubeStepReverse = s.tubeStepReverse;
-  $('tube-step-reverse').ariaPressed = String(tubeStepReverse);
+  pipeStepSource = s.pipeStepSource; pipeStepReverse = s.pipeStepReverse;
+  $('pipe-step-reverse').ariaPressed = String(pipeStepReverse);
   innerDiameter = s.innerDiameter;
   selectedPoint = null;
   setCurve({ ...structuredClone(s.curve), amplitude: Number(s.curve.amplitude) });
@@ -3846,10 +3875,10 @@ function restoreEditState(s) {
   $('step-apply').disabled = true;
   imageActive = structuredClone(s.imageActive); imageRaster = s.imageRaster;
   imagePhoto = s.imagePhoto; imagePhotoSource = s.imagePhotoSource;
-  for (const n of tubeNames) $('tube-slider-' + n).value = $('tube-' + n).value;
+  for (const n of pipeNames) $('pipe-slider-' + n).value = $('pipe-' + n).value;
   canvas.style.cursor = patternType() === 'spatial-brush' && spatialErase !== null ? 'crosshair' : '';
   syncBrushMode(patternType()==='brush');
-  tubeLabels(); paintBrush(); paintImage(); syncRenderControls(); syncPlaneTools();
+  pipeLabels(); paintBrush(); paintImage(); syncRenderControls(); syncPlaneTools();
   document.querySelectorAll('input[type="range"]').forEach(syncSliderFill);
   loadDisplay();
 }
@@ -3895,7 +3924,7 @@ document.addEventListener('keydown', event => {
 FluixerSerial.init({
   state: () => ({
     imported: !!importedCsv && !importedCsv.standard,
-    available: !interactivePreviewDirty && !calculationDisabled && !display?.geometry_only && !!display && !projectBusy && !previewLoading && !csvReading && !exporting &&
+    available: !interactivePreviewDirty && !!display && !projectBusy && !previewLoading && !csvReading && !exporting &&
       !importedCsv?.standard && (!!importedCsv || display.pattern_config?.type !== 'empty'),
   }),
   source: async compensated => {

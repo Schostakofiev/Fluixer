@@ -85,11 +85,11 @@ def rounded_orthogonal_path(points, radius, length_unit='mm'):
         pieces.append(CircularArc(center,radius,math.atan2(entry[2]-center[2],entry[0]-center[0]),math.copysign(math.pi/2,cross)))
         previous=end
     pieces.append(Line(previous,points[-1]))
-    return TubePath(tuple(pieces),length_unit)
+    return PipePath(tuple(pieces),length_unit)
 
 
 @dataclass(frozen=True)
-class TubePath:
+class PipePath:
     pieces: tuple[Line | UpwardSemicircle | CircularArc, ...]
     length_unit: str
     _ends: tuple[float, ...] = field(init=False, repr=False)
@@ -149,7 +149,7 @@ def s_curve(width=100, height=80, wind=16, *, length_unit='mm'):
         else:
             pieces.append(Line((width,0,z),(0,0,z)))
             pieces.append(UpwardSemicircle((0,0,z+gap/2),gap/2,-1))
-    return TubePath(tuple(pieces),length_unit)
+    return PipePath(tuple(pieces),length_unit)
 
 
 def hilbert_curve(width=80, height=75, order=3, *, rounded=True, length_unit='mm'):
@@ -172,4 +172,4 @@ def hilbert_curve(width=80, height=75, order=3, *, rounded=True, length_unit='mm
             scale *= 2
         points.append((x*width/(size-1),0,z*height/(size-1)))
     if rounded:return rounded_orthogonal_path(points,min(width,height)/(size-1)/4,length_unit)
-    return TubePath(tuple(Line(a,b) for a,b in zip(points,points[1:])),length_unit)
+    return PipePath(tuple(Line(a,b) for a,b in zip(points,points[1:])),length_unit)
