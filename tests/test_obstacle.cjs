@@ -1,0 +1,21 @@
+const assert=require('node:assert/strict');
+const O=require('../fluixer/ui/obstacle.js'),R=require('../fluixer/ui/interactive-constraints.js');
+const p=[[-5,-5,-5],[5,-5,-5],[5,5,-5],[-5,5,-5],[-5,-5,5],[5,-5,5],[5,5,5],[-5,5,5]];
+const faces=[[0,3,2,1],[4,5,6,7],[0,1,5,4],[3,7,6,2],[0,4,7,3],[1,2,6,5]];
+const triangles=faces.flatMap(([a,b,c,d])=>[[p[a],p[b],p[c]],[p[a],p[c],p[d]]]);
+const data={name:'box',triangles,position:[0,0,0],rotation:[0,0,0]},o=O.create(data);
+assert.equal(o.contact([0,0,7],1),null);
+assert.ok(o.contact([0,0,5.5],1)[2]>.49);
+assert.ok(Math.hypot(...o.contact([0,0,0],1))>=6);
+assert.ok(o.contact([0,0,-10],1,[0,0,10])[2]>15); // No tunnelling through a thin obstacle.
+const moved=O.create({...data,position:[20,0,0],rotation:[0,45,0]});
+assert.equal(moved.contact([0,0,0],1),null);
+assert.ok(moved.contact([20,0,0],1));
+let points=Array.from({length:17},(_,i)=>[(i-8)*2,0,8]);
+const state=R.create(points,{u:8,pins:[],target:R.length(points),diameter:2,stiffness:.2,collision:true,obstacle:o});
+console.time('obstacle pull');
+for(let i=0;i<45;i++)points=R.step(state,[0,0,-8],4);
+console.timeEnd('obstacle pull');
+assert.ok(!R.obstacleCollides(points,2,o),'curve penetrated obstacle');
+assert.ok(Math.abs(R.length(points)-state.target)<.05,'length drift');
+console.log('PASS: solid interior, surface clearance, swept contact, rigid transforms, rope contact and length.');

@@ -286,7 +286,7 @@ canvas:active {
   margin: 24px 0;
 }
 #pipe-step-open,
-#pipe-step-reverse,
+#pipe-reverse,
 #image-open,
 #image-clear,
 #step-open,
@@ -413,7 +413,8 @@ canvas:active {
   border-radius: var(--r-sm);
   background: var(--surface);
 }
-.view-tools .btn-icon[aria-pressed="true"] {
+.view-tools .btn-icon[aria-pressed="true"],
+.playback-controls .btn-icon[aria-pressed="true"] {
   background: var(--display);
   color: var(--bg);
   border-color: var(--display);
@@ -1043,3 +1044,9 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
   transform: translate(-50%, -50%) rotate(-90deg);
   touch-action: none;
 }
+
+#pipe-reverse { margin-top: 8px; }
+#pipe-reverse[aria-pressed="true"] { background: var(--display); color: var(--bg); border-color: var(--display); }
+
+/* Interactive collision object */
+.obstacle-controls .btn { width: 100%; margin-top: 8px; }

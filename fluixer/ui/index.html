@@ -11,6 +11,7 @@
     <script src="/history.js" defer></script>
     <script src="/visual-calibration.js" defer></script>
     <script src="/serial-controller.js" defer></script>
+    <script src="/obstacle.js" defer></script>
     <script src="/interactive-constraints.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
@@ -202,19 +203,22 @@
                 <input class="slider" id="interactive-length" type="range" min="10" max="1000" step="any" value="80" />
                 <input class="inp" id="interactive-length-value" type="number" min="10" max="1000" step="1" value="80" aria-label="Total Length (mm)" />
               </div>
+              <div class="obstacle-controls">
+                <label>Collision Object</label>
+                <button class="btn btn-outline" id="obstacle-open" type="button">Import STEP</button>
+                <input id="obstacle-file" type="file" accept=".stp,.step" hidden />
+                <div id="obstacle-transform" hidden>
+                  <button class="btn btn-outline btn-danger" id="obstacle-clear" type="button">Clear</button>
+                </div>
+                <p id="obstacle-status" class="note" role="status"></p>
+              </div>
             </div>
             <div id="pipe-step-fields" hidden>
               <button class="btn btn-outline" id="pipe-step-open" type="button">Import</button>
               <input id="pipe-step-file" type="file" accept=".stp,.step" hidden />
-              <button
-                class="btn btn-outline"
-                id="pipe-step-reverse"
-                type="button"
-                aria-pressed="false"
-              >
-                Reverse
-              </button>
+
             </div>
+            <button class="btn btn-outline" id="pipe-reverse" type="button" aria-pressed="false">Reverse</button>
             <div class="pair">
               <div id="pipe-radius-field">
                 <label id="pipe-radius-label" for="pipe-radius">Radius (mm)</label>
@@ -513,6 +517,9 @@
                 </div>
               </div>
             <div id="interactive-view-tools" class="view-tool-group" hidden role="toolbar" aria-label="Interactive Curve Tools">
+                <button class="btn-icon" id="obstacle-edit" type="button" aria-label="Transform STEP Object" title="Transform STEP Object" aria-pressed="false" disabled>
+                  <img class="ico button-svg" src="/svg/tool-gumball.svg" alt="" aria-hidden="true" draggable="false" />
+                </button>
                 <button class="btn-icon" id="interactive-pin" type="button" aria-label="Pin Curve" title="Pin Curve: click to select, Alt-click to remove" aria-pressed="false">
                   <img class="ico button-svg" src="/svg/interactive-pin.svg" alt="" aria-hidden="true" draggable="false" />
                 </button>
@@ -639,6 +646,17 @@
               <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M19 5v14M6 5l10 7-10 7z" />
               </svg>
+            </button>
+            <button
+              class="btn-icon"
+              id="playback-loop"
+              type="button"
+              aria-label="Loop Preview"
+              title="Loop Preview"
+              aria-pressed="false"
+              disabled
+            >
+              <img class="ico button-svg" src="/svg/loop.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
             <select
               class="inp"

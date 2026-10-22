@@ -47,7 +47,7 @@ def cylinder_settings(value=None):
     if not isinstance(reverse,bool):raise ValueError('Invalid pipe direction')
     if kind=='custom-step':
         if not isinstance(source,str) or not source or len(source.encode('utf-8'))>2097152:raise ValueError('Choose a STEP centerline up to 2 MB')
-    elif source is not None or reverse:raise ValueError('This pipe type does not accept STEP centerlines')
+    elif source is not None:raise ValueError('This pipe type does not accept STEP centerlines')
     points=None
     target_length=None
     avoid_collisions=True
@@ -90,7 +90,8 @@ def cylinder_config(cylinder):
     if cylinder.initial_placement is not None:
         from .projection import config
         result['initial_placement']=config(cylinder.initial_placement)
-    if cylinder.type=='custom-step':result.update(source=cylinder.source,reverse=cylinder.reverse)
+    result['reverse']=cylinder.reverse
+    if cylinder.type=='custom-step':result.update(source=cylinder.source)
     if cylinder.type=='interactive':result.update(points=cylinder.points,target_length=cylinder.target_length,avoid_collisions=cylinder.avoid_collisions,pins=cylinder.pins,stiffness=cylinder.stiffness)
     if cylinder.center is not None:result['center']=cylinder.center
     return result
@@ -103,7 +104,7 @@ def raw_pipe_path(c):
         return path
     if c.type=='custom-step':
         from .pipe_step import step_path
-        return step_path(c.source,c.reverse)
+        return step_path(c.source)
     if c.type=='hilbert':return hilbert_curve(width=2*c.radius,height=c.height,order=c.wind)
     if c.type=='s-curve':return s_curve(width=2*c.radius,height=c.height/2,wind=c.wind)
     return cylinder_spiral(radius=c.radius,diameter=c.diameter,height=c.height,wind=c.wind,samples_per_turn=c.samples_per_turn,period=c.period)
@@ -126,8 +127,27 @@ def path_bounds(path):
     return tuple(tuple(f(p[i] for p in points) for i in range(3)) for f in (min,max))
 
 
+def reverse_path(path):
+    from .cubic import CubicSpan
+    from .geometry import Line,UpwardSemicircle,CircularArc
+    import math
+    pieces=[]
+    for piece in reversed(path.pieces):
+        if isinstance(piece,Line):pieces.append(Line(piece.end,piece.start))
+        elif isinstance(piece,CubicSpan):pieces.append(CubicSpan(tuple((a+b+cc+d,-b-2*cc-3*d,cc+3*d,-d) for a,b,cc,d in piece.coefficients)))
+        elif isinstance(piece,UpwardSemicircle):pieces.append(CircularArc(piece.center,piece.radius,-math.pi/2+piece.side*math.pi,-piece.side*math.pi))
+        elif isinstance(piece,CircularArc):pieces.append(replace(piece,start_angle=piece.start_angle+piece.sweep,sweep=-piece.sweep))
+        else:raise ValueError('Unsupported path piece for reversal')
+    if isinstance(path,CubicPath):
+        total=path.parameter_ends[-1]
+        ends=tuple(total-t for t in reversed((0.,)+path.parameter_ends[:-1]))
+        return replace(path,pieces=tuple(pieces),parameter_ends=ends)
+    return replace(path,pieces=tuple(pieces))
+
+
 def pipe_path(c):
     path=raw_pipe_path(c)
+    if c.reverse:path=reverse_path(path)
     if c.center is None:return path
     from .cubic import CubicSpan
     from .geometry import Line

@@ -34,6 +34,7 @@ let initialPlacement = null,
   planeHandles = [],
   planeDrag = null;
 let interactivePoints = defaultInteractivePoints(), interactiveDrag = null, interactiveTargetLength = 80;
+let obstacleData = null, obstacleMesh = null, obstacleEditing = false, obstacleReadId = 0, obstacleBusy = false, obstacleDrag = null, obstacleHandles = [];
 let interactivePins = [], interactiveTool = null, interactiveStiffness = .2;
 let selectedInteractivePin = null;
 let interactivePreviewDirty=false,interactivePreviewTimer=null;
@@ -51,6 +52,7 @@ let projectBusy = false,
   previewTask = null;
 let animationProgress = 1,
   animationPlaying = false,
+  animationLoop = false,
   animationFrame = null,
   animationTime = null;
 let motionCache = null,
@@ -93,7 +95,9 @@ function syncPlayback() {
   const play = $('playback-play');
   play.classList.toggle('is-playing', animationPlaying);
   play.ariaLabel = play.title = animationPlaying ? 'Pause' : 'Play';
+  $('playback-loop').ariaPressed = String(animationLoop);
   for (const id of [
+    'playback-loop',
     'playback-play',
     'playback-start',
     'playback-final',
@@ -104,10 +108,14 @@ function syncPlayback() {
   syncPlaybackProgress();
 }
 // Per-frame updates never refresh unrelated controls or start requests.
+function previewCycleProgress() {
+  return animationLoop && animationProgress > 1 ? animationProgress % 1 : animationProgress;
+}
 function syncPlaybackProgress() {
-  $('playback-progress').value = Math.round(animationProgress * 1000);
+  const progress = previewCycleProgress();
+  $('playback-progress').value = Math.round(progress * 1000);
   syncSliderFill($('playback-progress'));
-  $('playback-progress').ariaValueText = Math.round(animationProgress * 100) + '%';
+  $('playback-progress').ariaValueText = Math.round(progress * 100) + '%';
   syncCurrentOutput();
 }
 function resetAnimation(refresh = true) {
@@ -206,15 +214,22 @@ function parsePreviewCsv(source, settings) {
   return { commands, outputCommands, total, previewCommands, previewTotal, preAdd, omittedPreAdd,
     kGas, kLiquid, lengthPer100Steps: stepLength, rows: rows.length - 1, approximate: units.has('segments') };
 }
-function csvPreviewWindows(sequence, pathLength, progress) {
-  const pumped = Math.max(0, Math.min(1, progress)) * sequence.previewTotal;
+function csvPreviewWindows(sequence, pathLength, progress, repeat = false) {
+  const period = sequence.previewTotal;
+  if (!(period > 0) || !(pathLength > 0)) return [];
+  const pumped = Math.max(0, repeat ? progress : Math.min(1, progress)) * period;
   const windows = [];
-  let injected = 0;
-  for (const command of sequence.previewCommands) {
-    const start = Math.max(0, pumped - injected - command.length);
-    const end = Math.min(pathLength, pumped - injected);
-    if (command.phase === 'liquid' && end > start) windows.push([start, end]);
-    injected += command.length;
+  // Visit only repetitions that can still occupy the pipe, not every elapsed cycle.
+  const first = repeat ? Math.max(0, Math.floor((pumped - pathLength) / period)) : 0;
+  const last = repeat ? Math.floor(pumped / period) : 0;
+  for (let cycle = first; cycle <= last; cycle++) {
+    let injected = cycle * period;
+    for (const command of sequence.previewCommands) {
+      const start = Math.max(0, pumped - injected - command.length);
+      const end = Math.min(pathLength, pumped - injected);
+      if (command.phase === 'liquid' && end > start) windows.push([start, end]);
+      injected += command.length;
+    }
   }
   // Injection order is opposite to increasing distance along the pipe.
   return windows.reverse();
@@ -295,7 +310,7 @@ function syncCurrentOutput() {
       currentOutputCache = { display, key, timeline: outputTimeline(display.segments, settings) };
     timeline = currentOutputCache.timeline;
   }
-  const command = outputAtProgress(timeline.commands, timeline.total, animationProgress);
+  const command = outputAtProgress(timeline.commands, timeline.total, previewCycleProgress());
   const output = currentOutputText(command, unit);
   el.textContent = output.text;
   unitLabel.textContent = output.unit;
@@ -305,7 +320,16 @@ for (const id of ['k-gas', 'k-liquid', 'length-per-100-steps', 'pre-add'])
 $('unit').addEventListener('change', syncCurrentOutput);
 
 
-function movingWindows(segments, length, progress) {
+function movingWindows(segments, length, progress, repeat = false) {
+  if (repeat) {
+    let last = segments.length - 1;
+    while (last >= 0 && segments[last].phase !== 'liquid') last--;
+    const commands = segments.slice(0, last + 1).reverse();
+    return csvPreviewWindows({
+      previewCommands: commands,
+      previewTotal: commands.reduce((total, segment) => total + segment.length, 0),
+    }, length, progress, true);
+  }
   // Injection order is reversed: the last liquid in the final path enters first.
   // Start with its leading boundary at the inlet, skipping terminal gas only.
   let position = 0,
@@ -350,14 +374,14 @@ function motionGeometry(data) {
   return edges;
 }
 function animatedSegments(data, progress) {
-  if (animatedCache?.data === data && animatedCache.csv === importedCsv && animatedCache.progress === progress)
+  if (animatedCache?.data === data && animatedCache.csv === importedCsv && animatedCache.progress === progress && animatedCache.loop === animationLoop)
     return animatedCache.segments;
   const segments = computeAnimatedSegments(data, progress);
-  animatedCache = { data, csv: importedCsv, progress, segments };
+  animatedCache = { data, csv: importedCsv, progress, loop: animationLoop, segments };
   return segments;
 }
 function computeAnimatedSegments(data, progress) {
-  if (!importedCsv && progress >= 1) return data.segments;
+  if (!importedCsv && !animationLoop && progress >= 1) return data.segments;
   if (motionSource !== data) {
     motionCache = motionGeometry(data);
     motionSource = data;
@@ -367,8 +391,8 @@ function computeAnimatedSegments(data, progress) {
     edge.a.map((v, j) => v + ((edge.b[j] - v) * (d - edge.start)) / (edge.end - edge.start));
   let cursor = 0;
   const windows = importedCsv
-    ? csvPreviewWindows(importedCsv, data.path_length, progress)
-    : movingWindows(data.segments, data.path_length, progress);
+    ? csvPreviewWindows(importedCsv, data.path_length, progress, animationLoop)
+    : movingWindows(data.segments, data.path_length, progress, animationLoop);
   for (const [start, end] of windows) {
     while (cursor < motionCache.length && motionCache[cursor].end <= start) cursor++;
     for (let i = cursor; i < motionCache.length && motionCache[i].start < end; i++) {
@@ -385,13 +409,12 @@ function animationTick(time) {
   animationFrame = null;
   if (!animationPlaying || !display) return;
   const rate = Number($('playback-rate').value) || 1;
-  if (animationTime !== null)
-    animationProgress = Math.min(
-      1,
-      animationProgress + (Math.max(0, time - animationTime) / 20000) * rate,
-    );
+  if (animationTime !== null) {
+    const next = animationProgress + (Math.max(0, time - animationTime) / 20000) * rate;
+    animationProgress = animationLoop ? next : Math.min(1, next);
+  }
   animationTime = time;
-  if (animationProgress >= 1) {
+  if (!animationLoop && animationProgress >= 1) {
     animationPlaying = false;
     animationTime = null;
   }
@@ -400,13 +423,23 @@ function animationTick(time) {
   draw();
   if (animationPlaying) animationFrame = window.requestAnimationFrame(animationTick);
 }
+$('playback-loop').addEventListener('click', () => {
+  if ($('playback-loop').disabled) return;
+  animationLoop = !animationLoop;
+  if (!animationLoop && animationProgress > 1) {
+    animationProgress = 1;
+    stopAnimation(false);
+  }
+  syncPlayback();
+  draw();
+});
 $('playback-play').addEventListener('click', () => {
   if (!display || projectBusy || previewLoading) return;
   if (animationPlaying) {
     stopAnimation();
     return;
   }
-  if (animationProgress >= 1) animationProgress = 0;
+  if (!animationLoop && animationProgress >= 1) animationProgress = 0;
   animationPlaying = true;
   animationTime = null;
   syncPlayback();
@@ -550,6 +583,7 @@ function draw() {
     ctx.lineTo(x - 5 * Math.cos(angle + 0.45), y - 5 * Math.sin(angle + 0.45));
     ctx.stroke();
   }
+  drawObstacle(rect);
   if (interactiveDrag || (interactivePreviewDirty && $('pipe-type').value==='interactive')) {
     $('pipe-webgl').hidden = true;
     drawInteractiveCurve(rect);drawInteractivePins(rect);
@@ -728,7 +762,7 @@ for (const id of ['pipe-inner', 'pipe-inner-slider'])
   });
 const DEFAULT_PIPE = { radius: 40, diameter: 4, height: 75, wind: 16 };
 let pipeStepSource = null,
-  pipeStepReverse = false,
+  pipeReverse = false,
   pipeStepReadId = 0;
 const pipeNames = ['radius', 'diameter', 'height', 'wind'];
 function validatePipe(c) {
@@ -772,6 +806,7 @@ function validatePipe(c) {
     if (c.avoid_collisions !== true || !Number.isFinite(c.target_length) || c.target_length <= 0 || !Array.isArray(c.pins) || new Set(c.pins).size !== c.pins.length || c.pins.some(i=>!Number.isInteger(i)||i<0||i>=c.points.length)) throw Error('Invalid Interactive constraints');
     if(!Number.isFinite(c.stiffness)||c.stiffness<0||c.stiffness>1)throw Error('Invalid Interactive stiffness');
   }
+  if (c.reverse !== undefined && typeof c.reverse !== 'boolean') throw Error('Invalid pipe direction');
   if (c.type === 'hilbert' && c.wind > 6) throw Error('Hilbert order must be between 1 and 6');
   if (
     c.type === 'custom-step' &&
@@ -804,10 +839,8 @@ function selectedPipe() {
   if (pipeCenter) c.center = pipeCenter.slice();
   if (placement) c.placement = clonePlane(placement);
   if (initialPlacement) c.initial_placement = clonePlane(initialPlacement);
-  if (c.type === 'custom-step') {
-    c.source = pipeStepSource;
-    c.reverse = pipeStepReverse;
-  }
+  c.reverse = pipeReverse;
+  if (c.type === 'custom-step') c.source = pipeStepSource;
   if (c.type === 'interactive') { c.points = structuredClone(interactivePoints); delete c.center;
     c.target_length = interactiveTargetLength;
     c.avoid_collisions = true; c.pins = interactivePins.slice(); c.stiffness = interactiveStiffness; }
@@ -874,9 +907,9 @@ function setPipe(c) {
   pipeCenter = c.center ? c.center.slice() : null;
   if (c.type === 'custom-step') {
     pipeStepSource = c.source;
-    pipeStepReverse = !!c.reverse;
-    $('pipe-step-reverse').ariaPressed = String(pipeStepReverse);
   }
+  pipeReverse = !!c.reverse;
+  $('pipe-reverse').ariaPressed = String(pipeReverse);
   initialPlacement = clonePlane(c.initial_placement || defaultPlacement(c));
   placement = clonePlane(c.placement || initialPlacement);
   planeVisible = !!c.placement;
@@ -895,7 +928,7 @@ function setPipe(c) {
 $('pipe-type').addEventListener('change', () => {
   spatialStroke = null;
   const next = $('pipe-type').value;
-  cancelInteractiveDrag();
+  acceptInteractiveDrag();
   if (next !== pipeKind) {
     ++pipeStepReadId;
     planeDrag = null;
@@ -915,6 +948,7 @@ $('pipe-type').addEventListener('change', () => {
   loadDisplay();
 });
 function pipeAvailability() {
+  $('pipe-reverse').disabled=projectBusy||csvReading||exporting;
   syncRenderControls();
   for (const n of pipeNames)
     for (const prefix of ['pipe-', 'pipe-slider-'])
@@ -943,13 +977,14 @@ $('pipe-reset').addEventListener('click', () => {
   const csvDiameter = importedCsv ? Number($('pipe-diameter').value) : null;
   if (!importedCsv) innerDiameter = 2;
   const type = $('pipe-type').value;
+  pipeReverse=false;$('pipe-reverse').ariaPressed='false';
   if (type === 'interactive') {
     interactivePoints = defaultInteractivePoints(); interactiveTargetLength = 80; interactivePins = []; interactiveStiffness = .2; pipeCenter = null; syncInteractiveControls();
     loadDisplay(); return;
   }
   if (type === 'custom-step') {
-    pipeStepReverse = false;
-    $('pipe-step-reverse').ariaPressed = 'false';
+    pipeReverse = false;
+    $('pipe-reverse').ariaPressed = 'false';
     $('pipe-diameter').value = csvDiameter ?? 4;
     $('pipe-slider-diameter').value = csvDiameter ?? 4;
     loadDisplay();
@@ -975,9 +1010,12 @@ $('pipe-reset').addEventListener('click', () => {
   loadDisplay();
 });
 $('pipe-step-open').addEventListener('click', () => $('pipe-step-file').click());
-$('pipe-step-reverse').addEventListener('click', () => {
-  pipeStepReverse = !pipeStepReverse;
-  $('pipe-step-reverse').ariaPressed = String(pipeStepReverse);
+$('pipe-reverse').addEventListener('click', () => {
+  if ($('pipe-reverse').disabled) return;
+  acceptInteractiveDrag();spatialStroke=null;
+  spatialWindows=spatialWindows.map(([a,b])=>[1-b,1-a]).reverse();
+  pipeReverse = !pipeReverse;
+  $('pipe-reverse').ariaPressed = String(pipeReverse);
   loadDisplay();
 });
 $('pipe-step-file').addEventListener('change', async () => {
@@ -999,9 +1037,9 @@ $('pipe-step-file').addEventListener('change', async () => {
     if (!response.ok) throw Error(data.error || 'Centerline validation failed');
     if (id !== pipeStepReadId || $('pipe-type').value !== 'custom-step') return;
     pipeStepSource = source;
-    pipeStepReverse = false;
+    pipeReverse = false;
     pipeCenter = null;
-    $('pipe-step-reverse').ariaPressed = 'false';
+    $('pipe-reverse').ariaPressed = 'false';
     await loadDisplay();
   } catch (error) {
     if (id === pipeStepReadId && $('pipe-type').value === 'custom-step') status(error.message, true);
@@ -1619,7 +1657,7 @@ function syncBrushTool() {
 for(const [id,erase] of [['brush-pen',false],['brush-eraser',true]]) {
   $(id).addEventListener('click',()=>{
     finishBrush();
-    cancelInteractiveDrag();interactiveTool=null;syncInteractiveControls();selectSidebarTab('pattern');
+    acceptInteractiveDrag();interactiveTool=null;syncInteractiveControls();selectSidebarTab('pattern');
     brushErase=brushErase===erase?null:erase;
     if(brushErase!==null){planeVisible=true;$('plane-tool').value='';}
     syncBrushTool();draw();
@@ -1947,8 +1985,9 @@ function followPipeResize() {
     pipeCenter = display.bounds[0].map((v, i) => (v + display.bounds[1][i]) / 2);
 }
 function loadDisplay() {
+  cancelObstacleDrag();
   clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
-  cancelInteractiveDrag(false);
+  acceptInteractiveDrag(false);
   if (csvReading) return;
   if (!editHistory?.restoring) followPipeResize();
   commitEditHistory();
@@ -1962,7 +2001,7 @@ function loadDisplay() {
     previewLoading = false;
     if (previewQueued) {
       previewQueued = false;
-      if(!interactiveDrag)loadDisplay();
+      if(!interactiveDrag&&!obstacleDrag)loadDisplay();
     } else {
       syncPlayback();
       startCalibPreview();
@@ -2054,6 +2093,175 @@ $('reset').addEventListener('click', () => {
   panY = 0;
   draw();
 });
+// STEP collision object. Transform values are rigid and never rescale the mesh.
+function setObstacle(data) {
+  ++obstacleReadId;
+  obstacleBusy=false;
+  obstacleData=data;
+  obstacleMesh=data?FluixerObstacle.create(data):null;
+  if(!data)obstacleEditing=false;
+  syncObstacleControls();
+}
+function syncObstacleControls() {
+  const busy=projectBusy||csvReading||exporting||obstacleBusy;
+  $('obstacle-open').disabled=busy;
+  $('obstacle-transform').hidden=!obstacleData;
+  $('obstacle-edit').ariaPressed=String(obstacleEditing);
+  for(const id of ['obstacle-edit','obstacle-clear'])$(id).disabled=busy||!obstacleData;
+  $('obstacle-status').textContent=obstacleBusy?'':obstacleData?.name||'';
+}
+function interactiveCollides(points,diameter) {
+  return FluixerInteractive.collides(points,diameter)||FluixerInteractive.obstacleCollides(points,diameter,obstacleMesh);
+}
+function settleObstacle(before) {
+  if(!obstacleMesh){commitEditHistory();draw();return;}
+  const radius=Number($('pipe-diameter').value)/2+.06;
+  if(interactivePins.some(i=>obstacleMesh.contact(interactivePoints[i],radius))) {
+    setObstacle(before);draw();status('The object overlaps a fixed pin. Move the object or unpin the curve.',true);return;
+  }
+  const solver=FluixerInteractive.create(interactivePoints,interactiveSolverOptions());
+  startInteractiveSolve(solver,'obstacle');
+  interactiveDrag.obstacleBefore=before;
+  if(interactiveCollides(interactivePoints,solver.diameter))interactiveDrag.lastValid=null;
+}
+$('obstacle-open').addEventListener('click',()=>{if(!$('obstacle-open').disabled)$('obstacle-file').click();});
+$('obstacle-file').addEventListener('change',async()=>{
+  const file=$('obstacle-file').files[0];$('obstacle-file').value='';if(!file)return;
+  const id=++obstacleReadId;obstacleBusy=true;syncObstacleControls();
+  try {
+    if(!/\.(stp|step)$/i.test(file.name)||file.size>2097152)throw Error('Choose a STEP solid smaller than 2 MB');
+    const response=await fetch('/api/obstacle-step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:await file.text()})});
+    const result=await response.json();if(!response.ok)throw Error(result.error||'Could not import STEP');
+    if(id!==obstacleReadId)return;
+    acceptInteractiveDrag();
+    const before=obstacleData;
+    const next={name:file.name,triangles:result.triangles,position:[0,0,0],rotation:[0,0,0]};
+    FluixerObstacle.validate(next);setObstacle(next);obstacleEditing=false;
+    settleObstacle(before);
+  }catch(error){if(id===obstacleReadId)status(error.message,true);}
+  finally{if(id===obstacleReadId){obstacleBusy=false;syncObstacleControls();}}
+});
+$('obstacle-clear').addEventListener('click',()=>{
+  acceptInteractiveDrag();setObstacle(null);commitEditHistory();draw();
+});
+$('obstacle-edit').addEventListener('click',()=>{
+  acceptInteractiveDrag();
+  obstacleEditing=!obstacleEditing;interactiveTool=null;selectedInteractivePin=null;
+  if(obstacleEditing){$('plane-tool').value='';syncPlaneTools();}
+  syncInteractiveControls();draw();
+});
+function obstacleAxes(rect) {
+  if(!obstacleEditing||!obstacleMesh||$('pipe-type').value!=='interactive')return [];
+  const project=createProjector(rect.width,rect.height),point=obstacleMesh.center,origin=project(point);
+  const size=65/viewScale(rect.width,rect.height);
+  return [0,1,2].map(k=>{
+    const direction=FluixerObstacle.rotation([0,1,2].map(i=>i===k?1:0),obstacleData.rotation);
+    return {k,direction,size,origin,end:project(point.map((v,i)=>v+direction[i]*size))};
+  });
+}
+function drawObstacle(rect) {
+  obstacleHandles=[];
+  if(!obstacleMesh||$('pipe-type').value!=='interactive')return;
+  const project=createProjector(rect.width,rect.height);
+  const triangles=obstacleMesh.triangles.map(t=>{
+    const p=t.map(v=>project(obstacleMesh.world(v)));return {p,depth:p.reduce((sum,v)=>sum+v[2],0)/3};
+  }).sort((a,b)=>b.depth-a.depth);
+  ctx.save();ctx.lineWidth=.5;ctx.strokeStyle='rgba(90,96,100,.12)';ctx.fillStyle='rgba(150,158,165,.16)';
+  for(const {p} of triangles){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);ctx.lineTo(p[1][0],p[1][1]);ctx.lineTo(p[2][0],p[2][1]);ctx.closePath();ctx.fill();ctx.stroke();}
+  for(const axis of obstacleAxes(rect)){
+    const color=['#ae5947','#55815b','#47778e'][axis.k];
+    ctx.strokeStyle=ctx.fillStyle=color;ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(axis.origin[0],axis.origin[1]);ctx.lineTo(axis.end[0],axis.end[1]);ctx.stroke();
+    const angle=Math.atan2(axis.end[1]-axis.origin[1],axis.end[0]-axis.origin[0]);
+    ctx.beginPath();ctx.moveTo(axis.end[0],axis.end[1]);
+    ctx.lineTo(axis.end[0]-13*Math.cos(angle-.4),axis.end[1]-13*Math.sin(angle-.4));
+    ctx.lineTo(axis.end[0]-13*Math.cos(angle+.4),axis.end[1]-13*Math.sin(angle+.4));ctx.closePath();ctx.fill();
+    ctx.fillText('XYZ'[axis.k],axis.end[0]+10,axis.end[1]);
+    obstacleHandles.push({axis,mode:'move',x:axis.end[0],y:axis.end[1]});
+    const center=obstacleMesh.center,u=objectAxis(obstacleData.rotation,(axis.k+1)%3),v=objectAxis(obstacleData.rotation,(axis.k+2)%3);
+    const radius=axis.size*.48;
+    const offset=direction=>project(center.map((x,k)=>x+radius*direction[k])).slice(0,2).map((x,k)=>x-axis.origin[k]);
+    const rotateU=offset(u),rotateV=offset(v);
+    ctx.lineWidth=1;ctx.beginPath();
+    for(let j=0;j<=64;j++){
+      const a=j*Math.PI/32;
+      const p=project(center.map((x,k)=>x+radius*(u[k]*Math.cos(a)+v[k]*Math.sin(a))));
+      if(j)ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);
+      if(j<64)obstacleHandles.push({axis,mode:'rotate',x:p[0],y:p[1],origin:axis.origin.slice(0,2),angle:a,rotateU,rotateV});
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+canvas.addEventListener('pointerdown',e=>{
+  if(e.button!==0||!e.isPrimary||!obstacleEditing||!obstacleData||projectBusy||csvReading||exporting)return;
+  const rect=canvas.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;
+  const hit=obstacleHandles.map(h=>({...h,distance:Math.hypot(x-h.x,y-h.y)}))
+    .filter(h=>h.distance<12).sort((a,b)=>a.distance-b.distance)[0];
+  if(!hit)return;
+  e.preventDefault();e.stopImmediatePropagation();if(interactiveDrag)acceptInteractiveDrag();
+  markInteractiveEditing();
+  const dx=hit.axis.end[0]-hit.axis.origin[0],dy=hit.axis.end[1]-hit.axis.origin[1];
+  obstacleDrag={...hit,dx,dy,sq:dx*dx+dy*dy,id:e.pointerId,x:e.clientX,y:e.clientY,
+    lastX:x,lastY:y,turn:0,targetAngle:0,currentAngle:0,before:obstacleData,
+    original:structuredClone(interactivePoints),target:obstacleData.position.slice(),
+    solver:FluixerInteractive.create(interactivePoints,interactiveSolverOptions()),frame:null};
+  obstacleDrag.frame=requestAnimationFrame(advanceObstacleDrag);
+  canvas.setPointerCapture(e.pointerId);canvas.focus({preventScroll:true});
+},true);
+canvas.addEventListener('pointermove',e=>{
+  const d=obstacleDrag;if(!d||d.id!==e.pointerId)return;
+  if(!(e.buttons&1)){finishObstacleDrag(e);return;}
+  e.preventDefault();e.stopImmediatePropagation();
+  if(d.mode==='rotate') {
+    const rect=canvas.getBoundingClientRect();
+    d.targetAngle=rotationDragStep(d,e.clientX-rect.left,e.clientY-rect.top);
+  }else if(d.sq>4){
+    const amount=((e.clientX-d.x)*d.dx+(e.clientY-d.y)*d.dy)/d.sq*d.axis.size;
+    const position=d.before.position.map((v,k)=>v+amount*d.axis.direction[k]);
+    if(position.some(v=>Math.abs(v)>10000))return;
+    d.target=position;
+  }
+},true);
+function advanceObstacleDrag() {
+  const d=obstacleDrag;if(!d)return;
+  const before=obstacleData;
+  let next,angle=d.currentAngle;
+  if(d.mode==='rotate'){
+    const difference=d.targetAngle-d.currentAngle;
+    const cap=d.solver.diameter*.25/Math.max(obstacleMesh.radius,1)*180/Math.PI;
+    angle+=Math.sign(difference)*Math.min(Math.abs(difference),cap);
+    next={...before,rotation:localAxisRotation(d.before.rotation,d.axis.k,angle)};
+  }else{
+    const delta=d.target.map((v,k)=>v-before.position[k]),distance=Math.hypot(...delta);
+    const factor=Math.min(1,d.solver.diameter*.25/(distance||1));
+    next={...before,position:before.position.map((v,k)=>v+delta[k]*factor)};
+  }
+  const mesh=FluixerObstacle.create(next);
+  if(!interactivePins.some(i=>mesh.contact(interactivePoints[i],d.solver.diameter/2+.06))) {
+    obstacleData=next;obstacleMesh=mesh;d.currentAngle=angle;
+  }
+  d.solver.obstacle=obstacleMesh;
+  interactivePoints=FluixerInteractive.step(d.solver,null,4);
+  syncObstacleControls();requestViewDraw();
+  d.frame=requestAnimationFrame(advanceObstacleDrag);
+}
+function cancelObstacleDrag() {
+  if(obstacleDrag)finishObstacleDrag({pointerId:obstacleDrag.id,type:'pointercancel',preventDefault(){},stopImmediatePropagation(){}});
+}
+function finishObstacleDrag(e) {
+  const d=obstacleDrag;if(!d||d.id!==e.pointerId)return;
+  e.preventDefault();e.stopImmediatePropagation();obstacleDrag=null;cancelAnimationFrame(d.frame);
+  if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+  if(e.type==='pointercancel'||e.type==='lostpointercapture'){
+    interactivePoints=d.original;setObstacle(d.before);scheduleInteractivePreview();draw();return;
+  }
+  settleObstacle(d.before);
+  if(interactiveDrag){interactiveDrag.original=d.original;interactiveDrag.lastValid=null;}
+
+}
+for(const type of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(type,finishObstacleDrag,true);
+
 // INTERACTIVE_EDITOR_START
 function defaultInteractivePoints() {
   return Array.from({ length: 33 }, (_, i) => [i * 2.5, 0, 37.5]);
@@ -2088,7 +2296,7 @@ function drawInteractiveCurve(rect) {
   ctx.save();ctx.globalAlpha=1;ctx.strokeStyle=uiColor('primary','#1C1C1C');ctx.lineWidth=3;
   ctx.beginPath();samples.forEach(({point},i)=>{const p=projectPoint(point);i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);});ctx.stroke();
   ctx.restore();
-  drawCurveEndpoints([{points:samples.map(sample=>sample.point)}],projectPoint);
+  drawCurveEndpoints([{points:(pipeReverse?samples.slice().reverse():samples).map(sample=>sample.point)}],projectPoint);
 }
 function markInteractiveEditing() {
   clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
@@ -2100,22 +2308,27 @@ function scheduleInteractivePreview() {
   clearTimeout(interactivePreviewTimer);
   interactivePreviewTimer=setTimeout(()=>{
     interactivePreviewTimer=null;
-    if(interactiveDrag)return;
+    if(interactiveDrag||obstacleDrag)return;
     loadDisplay();
   },700);
 }
-function acceptInteractiveDrag() {
+function acceptInteractiveDrag(schedule=true) {
   const d=interactiveDrag;if(!d)return;
   cancelAnimationFrame(d.frame);
-  if(d.collision&&FluixerInteractive.collides(interactivePoints,d.diameter))
+  if(d.collision&&interactiveCollides(interactivePoints,d.diameter)) {
     interactivePoints=d.lastValid||d.original;
+    if(d.obstacleBefore!==undefined&&!d.lastValid)setObstacle(d.obstacleBefore);
+  }
   if(d.solver.spanEdit)interactiveTargetLength=FluixerInteractive.length(interactivePoints);
-  interactiveDrag=null;syncInteractiveControls();commitEditHistory();
-  scheduleInteractivePreview();draw();
+  interactiveDrag=null;
+  if(d.id!==null&&canvas.hasPointerCapture(d.id))canvas.releasePointerCapture(d.id);
+  syncInteractiveControls();commitEditHistory();
+  if(schedule){scheduleInteractivePreview();draw();}
 }
 function cancelInteractiveDrag(schedule=true) {
   if (!interactiveDrag) return;
   const drag=interactiveDrag; cancelAnimationFrame(drag.frame); interactivePoints=drag.original; interactiveDrag=null;
+  if(drag.obstacleBefore!==undefined)setObstacle(drag.obstacleBefore);
   interactiveTargetLength=drag.originalTarget??interactiveTargetLength;
   interactiveStiffness=drag.originalStiffness??interactiveStiffness;
   if(drag.id!==null&&canvas.hasPointerCapture(drag.id)) canvas.releasePointerCapture(drag.id);
@@ -2139,6 +2352,7 @@ function syncViewEditTools() {
   $('view-edit-tools').hidden=!interactive&&!spatial&&!brush;
 }
 function syncInteractiveControls() {
+  syncObstacleControls();
   syncViewEditTools();
   const active=$('pipe-type').value==='interactive';
   if(!active)interactiveTool=null;
@@ -2211,15 +2425,15 @@ function startInteractivePinMove(e,axis,projectPoint) {
 let interactiveLengthEdit=null;
 for(const id of ['interactive-length','interactive-length-value']) {
   $(id).addEventListener('pointerdown',()=>{
-    cancelInteractiveDrag();interactiveLengthEdit=id==='interactive-length'?structuredClone(interactivePoints):null;
+    acceptInteractiveDrag();interactiveLengthEdit=id==='interactive-length'?structuredClone(interactivePoints):null;
   });
   $(id).addEventListener(id==='interactive-length'?'input':'change',()=>{
     const value=Number($(id).value);if(!Number.isFinite(value)||value<=0){syncInteractiveControls();return;}
-    cancelInteractiveDrag();
+    acceptInteractiveDrag();
     try {
       const next=FluixerInteractive.resize(interactiveLengthEdit||interactivePoints,value,interactivePins);
       validateInteractivePoints(next);
-      if(FluixerInteractive.collides(next,Number($('pipe-diameter').value)))throw Error('The end extension meets another part of the pipe. Move the end before extending it.');
+      if(interactiveCollides(next,Number($('pipe-diameter').value)))throw Error('The end extension meets the pipe or collision object. Move the end before extending it.');
       interactivePoints=next;interactiveTargetLength=FluixerInteractive.length(next);
       syncInteractiveControls();loadDisplay();
     }catch(error){syncInteractiveControls();status(error.message,true);}
@@ -2227,11 +2441,13 @@ for(const id of ['interactive-length','interactive-length-value']) {
   $(id).addEventListener('change',()=>{interactiveLengthEdit=null;syncInteractiveControls();});
 }
 for(const tool of ['pin','tension','slack']) $('interactive-'+tool).addEventListener('click',()=>{
-  cancelInteractiveDrag();selectSidebarTab('pipe');interactiveTool=interactiveTool===tool?null:tool;
+  acceptInteractiveDrag();obstacleEditing=false;selectSidebarTab('pipe');interactiveTool=interactiveTool===tool?null:tool;
   syncInteractiveControls();draw();
 });
 for(const id of ['plane-toggle','tool-gumball','tool-direction','plane-reset']) $(id).addEventListener('click',()=>{
-  if(interactiveTool){interactiveTool=null;syncInteractiveControls();draw();}
+  obstacleEditing=false;
+  if(interactiveTool)interactiveTool=null;
+  syncInteractiveControls();draw();
 });
 function startInteractiveSolve(solver,kind,originalStiffness=interactiveStiffness) {
   markInteractiveEditing();
@@ -2245,13 +2461,13 @@ function startInteractiveSolve(solver,kind,originalStiffness=interactiveStiffnes
 }
 function interactiveSolverOptions(u=0) {
   return {u,pins:interactivePins.slice(),target:interactiveTargetLength,stiffness:interactiveStiffness,
-    collision:true,diameter:Number($('pipe-diameter').value)};
+    collision:true,screenGrab:true,obstacle:obstacleMesh,diameter:Number($('pipe-diameter').value)};
 }
 for(const id of ['interactive-stiffness','interactive-stiffness-value']) {
   $(id).addEventListener(id==='interactive-stiffness'?'input':'change',()=>{
     const value=Number($(id).value);
     if(!Number.isFinite(value)||value<0||value>100){syncInteractiveControls();return;}
-    if(interactiveDrag?.kind!=='relax')cancelInteractiveDrag();
+    if(interactiveDrag?.kind!=='relax')acceptInteractiveDrag();
     const originalStiffness=interactiveStiffness;
     interactiveStiffness=value/100;syncInteractiveControls();
     if(interactiveDrag){interactiveDrag.solver.stiffness=interactiveStiffness;interactiveDrag.releaseSteps=0;interactiveDrag.settled=0;}
@@ -2335,7 +2551,9 @@ canvas.addEventListener('pointerdown',e=>{
     collision:true,diameter:Number($('pipe-diameter').value),
     basis:cameraBasis(),scale:viewScale(rect.width,rect.height),project:projectPoint};
   const d=interactiveDrag;
-  d.grabStep=2/d.scale; // Two CSS pixels per solver step at any view scale.
+  d.screenGrab=true; // RAF sets a time-based screen-space travel budget.
+  d.grabStep=6/d.scale;
+  d.obstacle=obstacleMesh;
   d.solver=FluixerInteractive.create(interactivePoints,d);
   d.mouse=d.solver.anchor.slice();d.settled=0;d.releaseSteps=0;
   if(d.solver.taut) status('The pinned section has no slack. Remove a pin to bend it.',true);
@@ -2355,14 +2573,22 @@ canvas.addEventListener('pointermove',e=>{
   const delta=d.basis.right.map((v,k)=>dx*v-dy*d.basis.up[k]);
   d.mouse=d.solver.anchor.map((v,k)=>v+delta[k]);
 },true);
-function advanceInteractive() {
+function advanceInteractive(time=performance.now()) {
   const d=interactiveDrag;if(!d)return;
   try {
     const start=performance.now();
+    const elapsed=Math.max(0,Math.min(.05,(time-(d.lastFrameTime??time-1000/60))/1000));
+    d.lastFrameTime=time;
+    const grabbing=!d.released&&!d.solver.spanEdit;
+    if(grabbing) {
+      const worldPerPixel=d.kind==='pin-move'
+        ? d.axis.size/Math.hypot(d.axis.dx,d.axis.dy) : 1/d.scale;
+      d.solver.grabStep=360*elapsed*worldPerPixel;
+    }
     if(d.solver.spanEdit&&!d.released)FluixerInteractive.setSpanDuration(d.solver,(start-d.holdStart)/1000);
     // Physics continues while the pointer is stationary and after release.
     // Bound the work per paint; pointer events only update the grab target.
-    for(let substep=0;substep<3;substep++) {
+    for(let substep=0;substep<(grabbing?1:3);substep++) {
       interactivePoints=FluixerInteractive.step(d.solver,d.released&&d.kind!=='pin-move'?null:d.mouse);
       if(d.released){
         d.releaseSteps++;
@@ -2373,11 +2599,12 @@ function advanceInteractive() {
     }
     validateInteractivePoints(interactivePoints);
     if(d.solver.spanEdit){interactiveTargetLength=FluixerInteractive.length(interactivePoints);syncInteractiveControls();}
-    if(!d.collision || !FluixerInteractive.collides(interactivePoints,d.diameter))
+    if(!d.collision || !interactiveCollides(interactivePoints,d.diameter))
       d.lastValid=structuredClone(interactivePoints);
     if(d.released && (d.settled>=4 || d.releaseSteps>=180)) {
-      if(d.collision && FluixerInteractive.collides(interactivePoints,d.diameter)) {
+      if(d.collision && interactiveCollides(interactivePoints,d.diameter)) {
         interactivePoints=d.lastValid || d.original;
+        if(d.obstacleBefore!==undefined&&!d.lastValid)setObstacle(d.obstacleBefore);
         status('The constraints could not settle. The last valid curve was retained.',true);
       }
       if(d.solver.spanEdit)interactiveTargetLength=FluixerInteractive.length(interactivePoints);
@@ -2397,8 +2624,8 @@ function finishInteractiveDrag(e) {
   if(canvas.hasPointerCapture(d.id))canvas.releasePointerCapture(d.id);
 }
 for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,finishInteractiveDrag,true);
-window.addEventListener('blur',cancelInteractiveDrag);
-document.addEventListener('keydown',e=>{if(e.key==='Escape' && interactiveDrag){e.preventDefault();cancelInteractiveDrag();}});
+window.addEventListener('blur',()=>acceptInteractiveDrag());
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&obstacleDrag){e.preventDefault();cancelObstacleDrag();return;}if(e.key==='Escape' && interactiveDrag){e.preventDefault();cancelInteractiveDrag();}});
 // INTERACTIVE_EDITOR_END
 
 let dragging = null;
@@ -2552,13 +2779,14 @@ function validateProject(value) {
   };
   if (value?.format !== PROJECT_FORMAT || value?.schema_version !== PROJECT_SCHEMA_VERSION)
     throw Error('Unsupported project format or version. Only schema 10 is supported');
-  keys(value, ['format', 'schema_version', 'pattern', 'compensation', 'cylinder', 'machine', 'view']);
+  keys(value, ['format', 'schema_version', 'pattern', 'compensation', 'cylinder', 'machine', 'view', ...(Object.hasOwn(value,'obstacle')?['obstacle']:[])]);
+  FluixerObstacle.validate(value.obstacle ?? null);
   validateCurve(value.compensation);
   const pipe = validatePipe(value.cylinder);
   keys(pipe, [
-    ...pipeNames, 'type', 'mapping', 'placement', 'initial_placement',
+    ...pipeNames, 'type', 'mapping', 'placement', 'initial_placement', 'reverse',
     ...(Object.hasOwn(pipe, 'center') ? ['center'] : []),
-    ...(pipe.type === 'custom-step' ? ['source', 'reverse'] : []),
+    ...(pipe.type === 'custom-step' ? ['source'] : []),
     ...(pipe.type === 'interactive' ? ['points', 'target_length', 'avoid_collisions', 'pins', 'stiffness'] : []),
   ]);
   if (!['cylinder', 's-curve', 'hilbert', 'custom-step', 'interactive'].includes(pipe.type) ||
@@ -2640,6 +2868,7 @@ function currentProject() {
   return validateProject({
     format: PROJECT_FORMAT,
     schema_version: PROJECT_SCHEMA_VERSION,
+    obstacle: obstacleData,
     pattern: shape.type === 'empty' ? { type: patternType(), source: null } : shape,
     compensation: selectedCurve(),
     cylinder: {
@@ -2687,6 +2916,7 @@ function restoreProject(project, data) {
   )
     throw Error('Spatial brush result mismatch');
   if (importedCsv || csvReading) clearCsvPreview();
+  setObstacle(project.obstacle ?? null);
   setPipe(project.cylinder);
   setCurve(project.compensation);
   endDrag();
@@ -2786,6 +3016,7 @@ $('project-file').addEventListener('change', async () => {
     'image-invert',
     'image-clear',
     'pipe-type',
+    'pipe-reverse',
     ...brushControls,
     ...stepControlIds,
     ...pipeNames.flatMap((n) => ['pipe-' + n, 'pipe-slider-' + n]),
@@ -3439,7 +3670,7 @@ $('spatial-size').addEventListener('input', () => syncSliderFill($('spatial-size
 syncSpatialControls();
 for(const [id,erase] of [['spatial-pen',false],['spatial-eraser',true]]) {
   $(id).addEventListener('click',()=>{
-    cancelInteractiveDrag();interactiveTool=null;syncInteractiveControls();selectSidebarTab('pattern');
+    acceptInteractiveDrag();interactiveTool=null;syncInteractiveControls();selectSidebarTab('pattern');
     spatialErase=spatialErase===erase?null:erase;
     syncSpatialControls();
   });
@@ -3838,19 +4069,21 @@ function captureEditState() {
     fields: Object.fromEntries(editFieldIds.map(id => [id, { value: $(id).value, checked: $(id).checked }])),
     curve: { ...structuredClone(curveState), amplitude: $('curve-amplitude').value },
     center: structuredClone(pipeCenter), placement: clonePlane(placement), initialPlacement: clonePlane(initialPlacement),
-    pipeStepSource, pipeStepReverse, innerDiameter, interactivePoints: structuredClone(interactivePoints), interactiveTargetLength, interactivePins: interactivePins.slice(), interactiveStiffness,
+    obstacleData,
+    pipeStepSource, pipeReverse, innerDiameter, interactivePoints: structuredClone(interactivePoints), interactiveTargetLength, interactivePins: interactivePins.slice(), interactiveStiffness,
     brushPixels: brushPixels.slice(), brushActive: structuredClone(brushActive),
     spatialWindows: structuredClone(spatialWindows), stepActive: structuredClone(stepActive), stepPlacement: structuredClone(stepPlacement),
     imageActive: structuredClone(imageActive), imageRaster, imagePhoto, imagePhotoSource,
   };
 }
 function sameEditState(a, b) {
-  if (a.imageRaster !== b.imageRaster || a.imagePhotoSource !== b.imagePhotoSource) return false;
+  if (a.obstacleData !== b.obstacleData || a.imageRaster !== b.imageRaster || a.imagePhotoSource !== b.imagePhotoSource) return false;
   // ImageData is immutable here. Comparing it pixel-by-pixel on every edit is unnecessary.
-  const content = s => JSON.stringify({ ...s, imageRaster: null, imagePhoto: null, brushPixels: Array.from(s.brushPixels) });
+  const content = s => JSON.stringify({ ...s, obstacleData: null, imageRaster: null, imagePhoto: null, brushPixels: Array.from(s.brushPixels) });
   return content(a) === content(b);
 }
 function restoreEditState(s) {
+  if (obstacleDrag) finishObstacleDrag({pointerId:obstacleDrag.id,type:"pointercancel",preventDefault(){},stopImmediatePropagation(){}});
   if (interactiveDrag) cancelInteractiveDrag();
   ++requestId; ++imageReadId; ++imageProcessId; ++stepReadId; ++pipeStepReadId;
   imagePhotoPending = null;
@@ -3864,8 +4097,9 @@ function restoreEditState(s) {
   interactiveTargetLength = s.interactiveTargetLength;
   interactivePins = s.interactivePins.slice();
   interactiveStiffness = s.interactiveStiffness;
-  pipeStepSource = s.pipeStepSource; pipeStepReverse = s.pipeStepReverse;
-  $('pipe-step-reverse').ariaPressed = String(pipeStepReverse);
+  setObstacle(s.obstacleData ?? null);
+  pipeStepSource = s.pipeStepSource; pipeReverse = s.pipeReverse;
+  $('pipe-reverse').ariaPressed = String(pipeReverse);
   innerDiameter = s.innerDiameter;
   selectedPoint = null;
   setCurve({ ...structuredClone(s.curve), amplitude: Number(s.curve.amplitude) });
@@ -3883,10 +4117,11 @@ function restoreEditState(s) {
   loadDisplay();
 }
 function commitEditHistory() {
-  if (!editHistory || projectBusy || csvReading || imageHistoryPending || interactiveDrag) return;
+  if (!editHistory || projectBusy || csvReading || imageHistoryPending || interactiveDrag || obstacleDrag || obstacleBusy) return;
   editHistory.checkpoint();
 }
 function moveEditHistory(redo = false) {
+  if(obstacleDrag){cancelObstacleDrag();return;}
   if (interactiveDrag) {cancelInteractiveDrag();return;}
   if (!editHistory || projectBusy || csvReading || stepBusy || exporting || imageHistoryPending) return;
   editHistory.move(redo);

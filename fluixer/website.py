@@ -76,7 +76,7 @@ def create_app(config=None):
 
     @app.get('/<path:asset>')
     def asset(asset):
-        allowed = asset in {'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'pipe-renderer.js', 'style.css'}
+        allowed = asset in {'obstacle.js', 'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'pipe-renderer.js', 'style.css'}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('svg/*.svg')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}
@@ -86,7 +86,7 @@ def create_app(config=None):
 
     @app.route('/api/<operation>', methods=['GET', 'POST'])
     def api(operation):
-        if operation not in {'display', 'export', 'calibration-standard', 'image', 'step', 'pipe-step', 'print-preview', 'print-step'}:
+        if operation not in {'display', 'export', 'calibration-standard', 'image', 'step', 'pipe-step', 'obstacle-step', 'print-preview', 'print-step'}:
             return jsonify(error='Endpoint not found'), 404
         if request.method == 'GET' and operation != 'display':
             return jsonify(error='Use POST for this endpoint'), 405
@@ -109,6 +109,11 @@ def create_app(config=None):
                 data = request.get_json()
             if not isinstance(data, dict):
                 raise ValueError('Request body must be a JSON object')
+            if operation == 'obstacle-step':
+                if set(data)!={'source'}:raise ValueError('Expected a source field')
+                from .obstacle_step import parse_obstacle_step
+                with _lock:result=parse_obstacle_step(data['source'])
+                return jsonify(result)
             if operation == 'print-step':
                 from .print_preview import print_step_payload
                 with _lock:body=print_step_payload(data)

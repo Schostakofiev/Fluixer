@@ -141,6 +141,28 @@
       project(points,[...coeff].map(([i,w])=>[i,normal.map(v=>w*v)]),distance-hit.clearance,mass,1,diameter*.2);
     }
   }
+  function solveObstacle(state) {
+    if(!state.obstacle)return;
+    const radius=state.diameter/2+.06;
+    // Sample the curved material, not just control particles. A swept test
+    // prevents a fast grab from jumping through a thin solid between frames.
+    const segments=capsules(state.points,state.diameter);
+    for(const segment of segments)for(const u of [segment.u0,(segment.u0+segment.u1)/2,segment.u1]) {
+      const b=basis(state.points.length,u),p=evaluate(state.points,b);
+      const correction=state.obstacle.contact(p,radius,evaluate(state.previous,b));
+      if(!correction)continue;
+      const depth=norm(correction);if(depth<1e-9)continue;
+      const normal=correction.map(v=>v/depth);
+      project(state.points,b.map(([i,w])=>[i,normal.map(v=>w*v)]),-depth,state.mass,1);
+    }
+  }
+  function obstacleCollides(points,diameter,obstacle,previous=null) {
+    if(!obstacle)return false;
+    for(const segment of capsules(points,diameter))for(const u of [segment.u0,(segment.u0+segment.u1)/2,segment.u1]) {
+      if(obstacle.contact(at(points,u),diameter/2-.01,previous?at(previous,u):null))return true;
+    }
+    return false;
+  }
   function solveBending(state) {
     const strength=.18*(state.stiffness||0)**2;
     if(!strength)return;
@@ -245,7 +267,7 @@
       previous[i]=points[i].slice();
       if(mass[i])for(let k=0;k<3;k++)points[i][k]+=v[k]*s;
     }
-    const handle=evaluate(points,grab);
+    const handle=evaluate(state.screenGrab?before:points,grab);
     const goal=mouse?mix(handle,mouse,Math.min(1,grabStep/(norm(sub(mouse,handle))||1))):null;
     for(let pass=0;pass<iterations;pass++){
       if(goal){
@@ -254,15 +276,16 @@
       }
       solveBending(state);
       solveLengths(state,pass%2===1);
-      if(state.collision&&pass%3===2)solveContacts(state);
+      if(state.collision&&pass%3===2){solveContacts(state);solveObstacle(state);}
     }
     // Close the scalar length residual without a global similarity transform.
     // This also keeps the backend/export length check consistent with the UI.
     for(let pass=0;pass<12;pass++){
       closeLength(state);
-      if(state.collision&&pass%3===2)solveContacts(state);
+      if(state.collision&&pass%3===2){solveContacts(state);solveObstacle(state);}
     }
     closeLength(state);closeLength(state);
+    solveObstacle(state);
     state.speed=Math.max(...points.map((p,i)=>norm(sub(p,before[i]))));
     return points;
   }
@@ -300,6 +323,6 @@
     return result;
   }
 
-  const api={length,at,segmentDistance,collides,create,createTension,createSlack,setSpanDuration,step,resize,minimumLength};
+  const api={obstacleCollides,length,at,segmentDistance,collides,create,createTension,createSlack,setSpanDuration,step,resize,minimumLength};
   if(typeof module!=='undefined')module.exports=api;else root.FluixerInteractive=api;
 })(typeof window==='undefined'?{}:window);

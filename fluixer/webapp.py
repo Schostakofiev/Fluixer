@@ -141,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.local_request():return
         url=urlsplit(self.path)
-        assets={'/interactive-constraints.js':('interactive-constraints.js','text/javascript'),'/serial-controller.js':('serial-controller.js','text/javascript'),'/history.js':('history.js','text/javascript'),'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/pipe-renderer.js':('pipe-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
+        assets={'/obstacle.js':('obstacle.js','text/javascript'),'/interactive-constraints.js':('interactive-constraints.js','text/javascript'),'/serial-controller.js':('serial-controller.js','text/javascript'),'/history.js':('history.js','text/javascript'),'/visual-calibration.js':('visual-calibration.js','text/javascript'),'/image-input.js':('image-input.js','text/javascript'),'/':('index.html','text/html'),'/app.js':('app.js','text/javascript'),'/pipe-renderer.js':('pipe-renderer.js','text/javascript'),'/style.css':('style.css','text/css')}
         for asset in (Path(__file__).parent/'ui').glob('svg/*.svg'):
             assets['/svg/'+asset.name]=('svg/'+asset.name,'image/svg+xml')
         for asset in (Path(__file__).parent/'ui').glob('css/*.css'):
@@ -169,11 +169,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.local_request():return
-        if self.path not in ('/api/image','/api/export','/api/calibration-standard','/api/step','/api/pipe-step','/api/display','/api/print-preview','/api/print-step'):self.error(404,'Endpoint not found');return
+        if self.path not in ('/api/image','/api/export','/api/calibration-standard','/api/step','/api/pipe-step','/api/obstacle-step','/api/display','/api/print-preview','/api/print-step'):self.error(404,'Endpoint not found');return
         try:
             count=int(self.headers.get('Content-Length','0'))
             if not 0<count<=4194304:raise ValueError('Request must not exceed 4 MB')
             data=json.loads(self.rfile.read(count))
+            if self.path=='/api/obstacle-step':
+                if not isinstance(data,dict) or set(data)!={'source'}:raise ValueError('Invalid STEP request parameters')
+                from .obstacle_step import parse_obstacle_step
+                with _lock:payload=parse_obstacle_step(data['source'])
+                self.send(200,json.dumps(payload).encode(),'application/json');return
             if self.path=='/api/print-step':
                 from .print_preview import print_step_payload
                 with _lock:body=print_step_payload(data)
