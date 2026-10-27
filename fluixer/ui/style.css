@@ -1,5 +1,7 @@
 /* Application layout; shared component visuals come from nothing-ui.css. */
 /* === Base layout and typography === */
+/* Type scale: minimum 11 CSS px; larger sizes retain 2px increments. */
+button, input, select, textarea { font-size: inherit; }
 :root {
   color-scheme: light;
 }
@@ -18,12 +20,12 @@ header {
   background: var(--bg);
 }
 .brand {
-  font-variation-settings: "ROND" 100;
+  
   font-family: var(--f-display);
   font-weight: 500;
-  font-size: 32px;
+  font-size: 40px;
   letter-spacing: 0;
-  color: var(--display);
+  color: var(--light-grey);
   text-decoration: none;
 }
 main {
@@ -70,7 +72,7 @@ label,
   color: var(--secondary);
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -250,11 +252,10 @@ canvas:active {
 }
 .metrics strong {
   font-family: var(--f-display);
-  font-weight: 500;
-  font-size: clamp(20px, 2.3vw, 32px);
+  font-weight: 400;
+  font-size: 36px;
+  color: var(--light-grey);
   font-variant-numeric: tabular-nums;
-  font-variation-settings: "ROND" 100;
-  color: var(--display);
   overflow-wrap: anywhere;
 }
 /* === Pattern and curve editors === */
@@ -281,7 +282,6 @@ canvas:active {
 #brush-fields,
 #spatial-fields,
 #step-fields,
-#pipe-step-fields,
 #image-fields {
   margin: 24px 0;
 }
@@ -296,10 +296,7 @@ canvas:active {
 #spatial-clear {
   width: 100%;
 }
-#pipe-step-fields:not([hidden]) {
-  display: grid;
-  gap: 8px;
-}
+#pipe-step-open { margin-top: 8px; }
 /* === Base responsive layout === */
 @media (max-width: 850px) {
   main {
@@ -410,7 +407,7 @@ canvas:active {
 }
 .view-tools .btn-icon,
 .playback-controls .btn-icon {
-  border-radius: var(--r-sm);
+  border-radius: var(--r-pill);
   background: var(--surface);
 }
 .view-tools .btn-icon[aria-pressed="true"],
@@ -534,7 +531,7 @@ canvas:active {
   gap: 6px;
 }
 .render-modes .btn-icon {
-  border-radius: var(--r-sm);
+  border-radius: var(--r-pill);
 }
 .render-modes [aria-pressed="true"] {
   background: var(--ink, #111);
@@ -621,14 +618,14 @@ aside {
   padding-bottom: 8px;
 }
 .sidebar-tabs button {
-  flex: 1;
+  flex: 8;
   min-width: 0;
   padding: 8px 2px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-pill);
   background: transparent;
   color: var(--secondary);
-  font: 400 10px var(--f-mono);
+  font: 400 11px var(--f-mono);
   cursor: pointer;
 }
 /* Short divider between Output and Calib; independent of tab order. */
@@ -687,7 +684,7 @@ aside {
 .sidebar-panel .inp {
   min-height: 34px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .sidebar-panel .note {
   margin-top: 8px;
@@ -762,7 +759,7 @@ aside {
 .calibration-thresholds .slider { margin: 12px 0; }
 .calibration-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 #calibration-result { display: block; font: 11px var(--f-mono); line-height: 1.6; }
-#calibration-error { color: var(--error); font: 12px var(--f-mono); line-height: 1.5; }
+#calibration-error { color: var(--error); font: 11px var(--f-mono); line-height: 1.5; }
 #calibration-error:empty { display: none; }
 #calibration-apply { margin-top: 12px; width: 100%; }
 @media (max-width: 700px) {
@@ -912,7 +909,7 @@ aside {
 .calibration-parameters-heading h2 { margin: 0; }
 
 /* Preview compensation is independent of render style and export choice. */
-#view-compensated { flex: none; border-radius: var(--r-sm); }
+#view-compensated { flex: none; border-radius: var(--r-pill); }
 #view-compensated[aria-pressed="true"] { background: var(--display); color: var(--bg); }
 .view-mode-divider { flex: 0 0 1px; width: 1px; height: 16px; background: var(--line); }
 .export-original { width: 100%; justify-content: space-between; margin-top: 8px; }
@@ -1018,7 +1015,7 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
 #view-print { position: relative; justify-content: center; }
 
 .print-mode-tools { position: relative; display: flex; }
-#print-export { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); border-radius: var(--r-sm); }
+#print-export { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); border-radius: var(--r-pill); }
 #print-export[hidden] { display: none; }
 
 /* Brush size sits beside its viewport tools, using the shared slider artwork. */

@@ -2,10 +2,10 @@
   'use strict';
   const nodes=[0,-.5384693101056831,.5384693101056831,-.906179845938664,.906179845938664];
   const weights=[.5688888888888889,.4786286704993665,.4786286704993665,.2369268850561891,.2369268850561891];
-  const sub=(a,b)=>a.map((v,k)=>v-b[k]);
-  const dot=(a,b)=>a.reduce((s,v,k)=>s+v*b[k],0);
-  const norm=v=>Math.hypot(...v);
-  const mix=(a,b,t)=>a.map((v,k)=>v+(b[k]-v)*t);
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const norm=v=>Math.hypot(v[0],v[1],v[2]);
+  const mix=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];
   const clamp=t=>Math.max(0,Math.min(1,t));
 
   // The same Hermite curve and quadrature as interactive.py. Constraint
@@ -63,26 +63,34 @@
   }
   const segmentDistance=(a,b,c,d)=>closest(a,b,c,d).distance;
 
+  function pointSegmentDistanceSquared(p,a,b) {
+    const x=b[0]-a[0],y=b[1]-a[1],z=b[2]-a[2];
+    const px=p[0]-a[0],py=p[1]-a[1],pz=p[2]-a[2],size=x*x+y*y+z*z;
+    const t=size?clamp((px*x+py*y+pz*z)/size):0;
+    return (px-t*x)**2+(py-t*y)**2+(pz-t*z)**2;
+  }
   // Capsule contacts on an adaptively flattened spline. Adjacent material is
   // a connected joint, not an obstacle. Local curvature is not a collision.
   function capsules(points,diameter) {
     const tolerance=Math.min(.02,diameter*.002),segments=[];let along=0;
     function flatten(bez,u0,u1,depth=0){
       const [a,b,c,d]=bez;
-      if(depth<16&&(Math.max(segmentDistance(b,b,a,d),segmentDistance(c,c,a,d))>tolerance||norm(sub(d,a))>diameter*.5)){
+      if(depth<16&&(Math.max(pointSegmentDistanceSquared(b,a,d),pointSegmentDistanceSquared(c,a,d))>tolerance*tolerance||dot(sub(d,a),sub(d,a))>diameter*diameter*.25)){
         const ab=mix(a,b,.5),bc=mix(b,c,.5),cd=mix(c,d,.5),abc=mix(ab,bc,.5),bcd=mix(bc,cd,.5),mid=mix(abc,bcd,.5),um=(u0+u1)/2;
         flatten([a,ab,abc,mid],u0,um,depth+1);flatten([mid,bcd,cd,d],um,u1,depth+1);return;
       }
       if(segments.length>=4096)throw Error('Interactive collision check is too complex');
       const end=along+norm(sub(d,a));segments.push({a,b:d,u0,u1,start:along,end});along=end;
     }
+    const tangents=points.map((p,i)=>i===0?sub(points[1],p):i===points.length-1?sub(p,points[i-1])
+      :sub(points[i+1],points[i-1]).map(v=>v/2));
     for(let i=0;i<points.length-1;i++){
-      const a=points[i],b=points[i+1],m=evaluate(points,basis(points.length,i,true)),n=evaluate(points,basis(points.length,i+1,true));
+      const a=points[i],b=points[i+1],m=tangents[i],n=tangents[i+1];
       flatten([a,a.map((v,k)=>v+m[k]/3),b.map((v,k)=>v-n[k]/3),b],i,i+1);
     }
     return segments;
   }
-  function contacts(points,diameter,margin=0) {
+  function contacts(points,diameter,margin=0,firstOnly=false) {
     const segments=capsules(points,diameter),result=[],gap=Math.PI*diameter/2,clearance=diameter+margin;
     // Sweep bounding boxes along their widest axis. Keep material-order contact
     // resolution identical to the all-pairs solver after removing distant pairs.
@@ -99,7 +107,10 @@
       if(b.start-a.end<gap)continue;
       let separated=false;
       for(let k=0;k<3;k++)if(x.lo[k]-y.hi[k]>clearance||y.lo[k]-x.hi[k]>clearance){separated=true;break;}
-      if(!separated)pairs.push([ai,bi]);
+      if(!separated) {
+        if(firstOnly){if(closest(a.a,a.b,b.a,b.b).distance<clearance)return [true];}
+        else pairs.push([ai,bi]);
+      }
     }
     pairs.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
     for(const [i,j] of pairs) {
@@ -110,7 +121,7 @@
   }
   function collides(points,diameter) {
     if(!Number.isFinite(diameter)||diameter<=0)return true;
-    return contacts(points,diameter,-Math.min(.02,diameter*.002)).length>0;
+    return contacts(points,diameter,-Math.min(.02,diameter*.002),true).length>0;
   }
   function project(points,gradients,error,mass,strength=1,limit=Infinity){
     if(mass.axisLock) {

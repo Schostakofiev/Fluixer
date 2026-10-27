@@ -491,9 +491,8 @@ function cameraBasis(azimuth = yaw, elevation = pitch) {
     -Math.cos(azimuth) * Math.cos(elevation),
     Math.sin(elevation),
   ];
-  const rawRight = cross([0, 0, 1], back),
-    length = Math.hypot(...rawRight);
-  const right = rawRight.map((x) => x / length),
+  // Derive right from yaw directly so the frame stays stable at either pole.
+  const right = [Math.cos(azimuth), -Math.sin(azimuth), 0],
     up = cross(back, right);
   // right x up = back; this is a right-handed camera frame (determinant +1).
   return { right, up, back };
@@ -551,7 +550,7 @@ function draw() {
   const center = modelFrame().center,
     origin = projectPoint(center),
     anchor = [rect.width - 50, rect.height - 48];
-  ctx.font = canvasFont(10);
+  ctx.font = canvasFont(11);
   ctx.lineWidth = 1.5;
   for (const [point, label, color] of [
     [center.map((v, i) => v + (i === 0 ? 10 : 0)), 'X', '#ae5947'],
@@ -1789,14 +1788,18 @@ function drawCurve(c) {
   }
   g.stroke();
   g.fillStyle = uiColor('primary', '#1C1C1C');
-  g.font = canvasFont(10);
+  g.font = canvasFont(11);
   for (let i = 0; i < c.x.length; i++) {
     g.beginPath();
     g.arc(px(c.x[i]), py(c.y[i]), i === selectedPoint ? 6 : 3, 0, Math.PI * 2);
     g.fill();
   }
   // Keep text upright while placing it beside the rotated geometry.
-  g.setTransform(side / 280, 0, 0, side / 280, 0, 0);
+  const textScale = (canvas.clientWidth || 280) / 280;
+  const pixelRatio = side / (canvas.clientWidth || 280);
+  g.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  g.font = canvasFont(11);
+  const text = (label, x, y) => g.fillText(label, x * textScale, y * textScale);
   g.textAlign = 'left';
   g.textBaseline = 'alphabetic';
   for (let i = 0; i < c.x.length; i++) {
@@ -1804,18 +1807,18 @@ function drawCurve(c) {
     const label = 'P' + i,
       x = w - py(c.y[i]),
       y = px(c.x[i]),
-      textWidth = g.measureText(label).width;
+      textWidth = g.measureText(label).width / textScale;
     const labelX = x + 5 + textWidth <= w - 4 ? x + 5 : x - 5 - textWidth;
-    g.fillText(label, Math.max(4, labelX), Math.max(12, y - 5));
+    text(label, Math.max(4, labelX), Math.max(12, y - 5));
   }
   g.textAlign = 'center';
-  g.fillText('-1', 24, 16);
-  g.fillText('0', 144, 16);
-  g.fillText('+1', 264, 16);
+  text('-1', 24, 16);
+  text('0', 144, 16);
+  text('+1', 264, 16);
   g.textAlign = 'right';
   g.textBaseline = 'middle';
-  g.fillText('0', 16, 24);
-  g.fillText('1', 16, 264);
+  text('0', 16, 24);
+  text('1', 16, 264);
 }
 function sameCurve(a, b) {
   return (
@@ -1989,6 +1992,25 @@ function loadDisplay() {
   clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
   acceptInteractiveDrag(false);
   if (csvReading) return;
+  if ($('pipe-type').value === 'custom-step' && !pipeStepSource) {
+    // An empty STEP input has no preview; invalidate any previous pipe request.
+    ++requestId;
+    previewQueued = false;
+    display = null;
+    interactivePreviewDirty = false;
+    cancelPrintPreview();
+    stopAnimation(false);
+    commitEditHistory();
+    pipeAvailability();
+    setExportDisabled(true);
+    $('project-save').disabled = true;
+    $('project-open').disabled = false;
+    for (const id of ['total', 'current-output-value', 'count']) $(id).textContent = '—';
+    status('');
+    syncPlayback();
+    draw();
+    return Promise.resolve();
+  }
   if (!editHistory?.restoring) followPipeResize();
   commitEditHistory();
   ++requestId;
@@ -2392,7 +2414,7 @@ function drawInteractivePins(rect) {
       ctx.beginPath();ctx.moveTo(x,y);
       ctx.lineTo(x-9*Math.cos(angle-.4),y-9*Math.sin(angle-.4));
       ctx.lineTo(x-9*Math.cos(angle+.4),y-9*Math.sin(angle+.4));ctx.closePath();ctx.fill();
-      ctx.font='11px sans-serif';ctx.fillText(axis.name,x+6,y-6);
+      ctx.font=canvasFont(11);ctx.fillText(axis.name,x+6,y-6);
     }
   }
   ctx.restore();
@@ -2552,7 +2574,7 @@ canvas.addEventListener('pointerdown',e=>{
     basis:cameraBasis(),scale:viewScale(rect.width,rect.height),project:projectPoint};
   const d=interactiveDrag;
   d.screenGrab=true; // RAF sets a time-based screen-space travel budget.
-  d.grabStep=6/d.scale;
+  d.grabStep=9/d.scale;
   d.obstacle=obstacleMesh;
   d.solver=FluixerInteractive.create(interactivePoints,d);
   d.mouse=d.solver.anchor.slice();d.settled=0;d.releaseSteps=0;
@@ -2583,7 +2605,7 @@ function advanceInteractive(time=performance.now()) {
     if(grabbing) {
       const worldPerPixel=d.kind==='pin-move'
         ? d.axis.size/Math.hypot(d.axis.dx,d.axis.dy) : 1/d.scale;
-      d.solver.grabStep=360*elapsed*worldPerPixel;
+      d.solver.grabStep=540*elapsed*worldPerPixel;
     }
     if(d.solver.spanEdit&&!d.released)FluixerInteractive.setSpanDuration(d.solver,(start-d.holdStart)/1000);
     // Physics continues while the pointer is stationary and after release.
@@ -2656,7 +2678,7 @@ canvas.addEventListener('pointermove', (e) => {
     zoom = Math.max(0.1, Math.min(10, zoom * Math.exp(-dy * 0.01)));
   } else {
     yaw += dx * 0.008;
-    pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.008));
+    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch + dy * 0.008));
   }
   dragging.x = e.clientX;
   dragging.y = e.clientY;
@@ -2695,7 +2717,7 @@ canvas.addEventListener('keydown', (e) => {
     panY += dy * 20;
   } else {
     yaw += dx * 0.1;
-    pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.1));
+    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch + dy * 0.1));
   }
   requestViewDraw();
 });
@@ -2850,7 +2872,7 @@ function validateProject(value) {
       !Number.isFinite(render.inner) || render.inner <= 0 || render.inner >= pipe.diameter)
     throw Error('Invalid inner or outer pipe diameter');
   const ranges = {
-    yaw: [-Math.PI, Math.PI], pitch: [-1.4, 1.4], zoom: [0.1, 10],
+    yaw: [-Math.PI, Math.PI], pitch: [-Math.PI / 2, Math.PI / 2], zoom: [0.1, 10],
     pan_x: [-1e6, 1e6], pan_y: [-1e6, 1e6],
   };
   for (const [key, [min, max]] of Object.entries(ranges)) {
@@ -3758,6 +3780,7 @@ window.addEventListener('blur', () => {
 
 // Canvas text uses the same typography token as labels and numeric inputs.
 function canvasFont(size) {
+  size = size <= 11 ? 11 : Math.ceil(size / 2) * 2;
   const family =
     typeof getComputedStyle === 'function'
       ? getComputedStyle(document.documentElement).getPropertyValue('--f-mono').trim()
@@ -3765,7 +3788,7 @@ function canvasFont(size) {
   return `${size}px ${family || '"Geist Mono", "Microsoft YaHei", sans-serif'}`;
 }
 if (document.fonts) {
-  Promise.all([document.fonts.load('10px "Geist Mono"'), document.fonts.ready]).then(() => {
+  Promise.all([document.fonts.load('11px "Geist Mono"'), document.fonts.ready]).then(() => {
     draw();
     drawCurve(curveState);
     if (stepDraft) drawStepDraft();
@@ -3836,7 +3859,7 @@ for (const key of sidebarTabKeys) {
     }
   });
 }
-selectSidebarTab('pattern');
+selectSidebarTab('output');
 
 function setExportDisabled(disabled) {
   $('export').disabled = disabled || interactivePreviewDirty;

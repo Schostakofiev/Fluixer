@@ -1,11 +1,11 @@
 /* nothing-ui · tokens — edit here to re-skin globally.
-   The bundled type system is fully open source under SIL OFL 1.1. */
-@font-face{font-family:'Doto';src:url('../fonts/open/Doto-ROND-wght.ttf') format('truetype');font-style:normal;font-weight:100 900;font-display:swap}
-@font-face{font-family:'Geist';src:url('../fonts/open/Geist-Regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
-@font-face{font-family:'Geist';src:url('../fonts/open/Geist-SemiBold.ttf') format('truetype');font-style:normal;font-weight:600;font-display:swap}
-@font-face{font-family:'Geist Mono';src:url('../fonts/open/GeistMono-Regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap}
-@font-face{font-family:'Geist Mono';src:url('../fonts/open/GeistMono-Medium.ttf') format('truetype');font-style:normal;font-weight:500;font-display:swap}
-@font-face{font-family:'Newsreader';src:url('../fonts/open/Newsreader-Italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap}
+   Display font: HYPixel; other bundled fonts retain their accompanying licenses. */
+@font-face{font-family:'Dot';src:url('../fonts/open/DatDot-Regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap;}
+@font-face{font-family:'Geist';src:url('../fonts/open/Geist-Regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap;}
+@font-face{font-family:'Geist';src:url('../fonts/open/Geist-SemiBold.ttf') format('truetype');font-style:normal;font-weight:600;font-display:swap;}
+@font-face{font-family:'Geist Mono';src:url('../fonts/open/GeistMono-Regular.ttf') format('truetype');font-style:normal;font-weight:400;font-display:swap;}
+@font-face{font-family:'Geist Mono';src:url('../fonts/open/GeistMono-Medium.ttf') format('truetype');font-style:normal;font-weight:500;font-display:swap;}
+@font-face{font-family:'Newsreader';src:url('../fonts/open/Newsreader-Italic.ttf') format('truetype');font-style:italic;font-weight:400;font-display:swap;}
 :root{
   --black:#000; --dark-grey:#171717; --grey:#2A2A2A; --light-grey:#5A5A5A; --white:#FFF;
   --bg:#000; --surface:#0C0C0C; --raised:#171717;
@@ -14,11 +14,11 @@
   --accent:#D71921; --accent-ink:#FFFFFF; --accent-text:#FF4438;
   --success:#7BE38A; --warning:#F2C94C; --error:#FF5247;
   --f-cjk:'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif;
-  --f-display:'Doto',var(--f-cjk); --f-ui:'Geist','Helvetica Neue',Arial,var(--f-cjk); --f-mono:'Geist Mono',var(--f-cjk);
+  --f-display:'Dot',var(--f-cjk); --f-ui:'Geist','Helvetica Neue',Arial,var(--f-cjk); --f-mono:'Geist Mono',var(--f-cjk);
   --f-head:'Geist','Helvetica Neue',Arial,var(--f-cjk); --f-editorial:'Newsreader',Georgia,serif;
   --dotbg:rgba(255,255,255,.48);
   --glass:rgba(16,16,16,.9); --glass-brd:rgba(255,255,255,.09);
-  --r-sm:999px; --r-md:8px; --r-pill:999px; --ease:ease-in-out;
+  --r-sm:100px; --r-md:8px; --r-pill:999px; --ease:ease-in-out;
 }
 [data-theme="light"]{
   --bg:#F2F2F2; --surface:#FFF; --raised:#EDEDED; --line:#E2E2E2; --line-2:#CFCFCF;

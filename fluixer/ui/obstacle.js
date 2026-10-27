@@ -1,7 +1,7 @@
 (function(root) {
   'use strict';
-  const sub=(a,b)=>a.map((v,k)=>v-b[k]),add=(a,b)=>a.map((v,k)=>v+b[k]);
-  const mul=(a,t)=>a.map(v=>v*t),dot=(a,b)=>a.reduce((s,v,k)=>s+v*b[k],0);
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+  const mul=(a,t)=>[a[0]*t,a[1]*t,a[2]*t],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
   const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
   const unit=a=>mul(a,1/(Math.hypot(...a)||1));
   function rotation(v,r,inverse=false) {
@@ -70,32 +70,43 @@
     let tree=meshCache.get(data.triangles);
     if(!tree){tree=build(data.triangles.slice());meshCache.set(data.triangles,tree);}
     const center=tree.lo.map((v,k)=>(v+tree.hi[k])/2);
-    const local=p=>add(center,rotation(sub(sub(p,center),data.position),data.rotation,true));
-    const world=p=>add(add(center,rotation(sub(p,center),data.rotation)),data.position);
-    function hits(p,d,max=Infinity) {
+    const axes=[[1,0,0],[0,1,0],[0,0,1]].map(v=>rotation(v,data.rotation));
+    const origin=add(center,data.position);
+    const rotate=v=>[0,1,2].map(k=>axes[0][k]*v[0]+axes[1][k]*v[1]+axes[2][k]*v[2]);
+    const local=p=>{const v=sub(p,origin);return [dot(v,axes[0])+center[0],dot(v,axes[1])+center[1],dot(v,axes[2])+center[2]];};
+    const world=p=>add(origin,rotate(sub(p,center)));
+    function hits(p,d,max=Infinity,firstOnly=false) {
       const result=[],stack=[tree];
       while(stack.length){const n=stack.pop();if(!boxRay(n,p,d,max))continue;
-        if(n.triangles)for(const t of n.triangles){const v=rayTriangle(p,d,t);if(v!==null&&v<=max)result.push({distance:v,triangle:t});}
+        if(n.triangles)for(const t of n.triangles){const v=rayTriangle(p,d,t);if(v!==null&&v<=max){if(firstOnly){max=v;result[0]={distance:v,triangle:t};}else result.push({distance:v,triangle:t});}}
         else stack.push(n.left,n.right);
       }
+      if(firstOnly)return result;
       result.sort((a,b)=>a.distance-b.distance);
       return result.filter((h,i)=>!i||h.distance-result[i-1].distance>1e-7);
     }
     function nearest(p) {
       let best=Infinity,point=null,triangle=null;
-      function visit(n){
-        const distance=p.reduce((s,v,k)=>s+Math.max(n.lo[k]-v,0,v-n.hi[k])**2,0);
+      const boxDistance=n=>{
+        const x=Math.max(n.lo[0]-p[0],0,p[0]-n.hi[0]),y=Math.max(n.lo[1]-p[1],0,p[1]-n.hi[1]),z=Math.max(n.lo[2]-p[2],0,p[2]-n.hi[2]);
+        return x*x+y*y+z*z;
+      };
+      function visit(n,distance){
         if(distance>best)return;
-        if(n.triangles)for(const t of n.triangles){const q=closest(p,t),d=dot(sub(p,q),sub(p,q));if(d<best){best=d;point=q;triangle=t;}}
-        else {visit(n.left);visit(n.right);}
+        if(n.triangles)for(const t of n.triangles){const q=closest(p,t),v=sub(p,q),d=dot(v,v);if(d<best){best=d;point=q;triangle=t;}}
+        else {
+          const a=boxDistance(n.left),b=boxDistance(n.right);
+          if(a<=b){visit(n.left,a);visit(n.right,b);}else{visit(n.right,b);visit(n.left,a);}
+        }
       }
-      visit(tree);return {point,distance:Math.sqrt(best),triangle};
+      visit(tree,boxDistance(tree));return {point,distance:Math.sqrt(best),triangle};
     }
+    const insideRay=unit([1,.371390676,.529182]);
     function contact(point,radius,previous=null) {
       const p=local(point);
       if(previous){
         const old=local(previous),delta=sub(p,old),len=Math.hypot(...delta);
-        if(len>1e-8){const h=hits(old,mul(delta,1/len),len)[0];
+        if(len>1e-8){const h=hits(old,mul(delta,1/len),len,true)[0];
           if(h){let normal=unit(cross(sub(h.triangle[1],h.triangle[0]),sub(h.triangle[2],h.triangle[0])));
             if(dot(normal,delta)>0)normal=mul(normal,-1);
             const target=world(add(add(old,mul(delta,h.distance/len)),mul(normal,radius)));
@@ -105,11 +116,11 @@
       }
       if(p.some((v,k)=>v<tree.lo[k]-radius||v>tree.hi[k]+radius))return null;
       const n=nearest(p);
-      const inside=hits(p,unit([1,.371390676,.529182])).length%2===1;
+      const inside=p.every((v,k)=>v>=tree.lo[k]&&v<=tree.hi[k]) && hits(p,insideRay).length%2===1;
       if(!inside&&n.distance>=radius)return null;
       let normal=n.distance>1e-9?mul(sub(p,n.point),(inside?-1:1)/n.distance)
         :unit(cross(sub(n.triangle[1],n.triangle[0]),sub(n.triangle[2],n.triangle[0])));
-      return rotation(mul(normal,inside?radius+n.distance:radius-n.distance),data.rotation);
+      return rotate(mul(normal,inside?radius+n.distance:radius-n.distance));
     }
     return {contact,world,center:world(center),radius:Math.hypot(...tree.hi.map((v,k)=>(v-tree.lo[k])/2)),triangles:data.triangles};
   }
