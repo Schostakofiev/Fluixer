@@ -1,0 +1,70 @@
+/* On-demand guide: isolated from the application layout and input controls. */
+#tour-help { position:fixed; right:18px; bottom:18px; z-index:20; width:32px; height:32px; border-radius:var(--r-pill); background:var(--bg); border:1px solid var(--line-2); font:500 20px var(--f-mono); }
+#quick-guide { position:fixed; inset:0; width:100vw; height:100dvh; max-width:none; max-height:none; margin:0; padding:0; border:0; background:transparent; color:var(--primary); overflow:hidden; }
+#quick-guide::backdrop { background:transparent; }
+#quick-guide .tour-spotlight { position:absolute; border:1px solid var(--primary); border-radius:var(--r-md); box-shadow:0 0 0 200vmax #0008; pointer-events:none; }
+#quick-guide .tour-card { position:absolute; box-sizing:border-box; max-height:calc(100dvh - 24px); overflow:auto; padding:24px; background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r-md); box-shadow:0 16px 60px #0003; }
+#quick-guide .tour-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; font:11px var(--f-mono); letter-spacing:.1em; }
+#tour-help,
+#quick-guide .btn-icon {
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#tour-help > .ico,
+#quick-guide .btn-icon > .ico {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+#quick-guide .tour-progress { height:2px; margin:16px 0 24px; background:var(--line); overflow:hidden; }
+#quick-guide .tour-progress div { height:100%; width:0; background:var(--display); }
+#quick-guide h2 { font:500 28px var(--f-display); margin:0 0 14px; }
+#quick-guide h3 { font:600 16px var(--f-ui); margin:0 0 12px; }
+#quick-guide p { font:14px/1.65 var(--f-ui); margin:0 0 16px; color:var(--secondary); }
+#quick-guide #tour-note:empty { display:none; }
+#quick-guide #tour-note { font-size:12px; border-left:2px solid var(--line-2); padding-left:10px; }
+#quick-guide #tour-focus { border-top:1px solid var(--line); padding-top:14px; font:12px/1.5 var(--f-mono); }
+#quick-guide .tour-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:24px; padding:0; border:0; }
+#quick-guide .tour-actions .btn { margin:0; border-radius:var(--r-sm); min-width:76px; justify-content:center; }
+#quick-guide #tour-count { font:12px var(--f-mono); }
+/* Self-contained demonstrations never dispatch events to application controls. */
+#quick-guide .tour-demo { margin:16px 0; border:1px solid var(--line-2); border-radius:var(--r-md); overflow:hidden; background:#fff; }
+#quick-guide .tour-demo svg { display:block; width:100%; height:auto; }
+#quick-guide .tour-demo-bar { display:flex; gap:8px; align-items:center; justify-content:space-between; min-height:34px; padding:6px 10px; border-top:1px solid var(--line); background:var(--surface); }
+#quick-guide #tour-demo-caption { font:11px/1.4 var(--f-mono); }
+
+#quick-guide .tour-heading { margin-bottom:10px; }
+#quick-guide .tour-progress { margin:10px 0 16px; }
+#quick-guide .tour-actions { margin-top:16px; }
+@media (max-height:740px) { #quick-guide .tour-demo svg { max-height:180px; } #quick-guide .tour-card { padding:18px; } }
+#quick-guide .tour-cursor { position:fixed; left:50%; top:50%; width:24px; height:24px; transform:translate(-3px, -3px); pointer-events:none; z-index:10; filter:drop-shadow(0 2px 2px #0005); }
+#quick-guide .tour-cursor img { display:block; width:100%; height:100%; object-fit:contain; }
+#quick-guide .tour-target { position:fixed; box-sizing:border-box; border:2px solid var(--accent); border-radius:0; pointer-events:none; z-index:9; }
+#quick-guide .tour-cursor[hidden], #quick-guide .tour-target[hidden] { display:none; }
+#quick-guide .tour-demo-bar { margin:16px 0; border:0; border-left:2px solid var(--accent); }
+/* Auto-open guide copy: retain original typography and options, not the closed pill shape. */
+#quick-guide .tour-select-list { box-sizing:border-box; z-index:8; border:1px solid #888; border-radius:0; background:#fff; background-image:none; padding:0; box-shadow:0 3px 8px #0003; color:#111; pointer-events:none; }
+#quick-guide .tour-select-list option { padding:6px 10px; min-height:28px; box-sizing:border-box; }
+
+/* The photo dialog and guide stay side by side during the demonstration. */
+#calibration-dialog.tour-photo-active {
+  inset: 16px auto auto 16px;
+  margin: 0;
+  width: calc(100vw - min(440px, 34vw) - 48px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+@media (max-width: 1200px) {
+  #calibration-dialog.tour-photo-active .calibration-dialog-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -21,11 +21,11 @@
   --r-sm:100px; --r-md:8px; --r-pill:999px; --ease:ease-in-out;
 }
 [data-theme="light"]{
-  --bg:#F2F2F2; --surface:#FFF; --raised:#EDEDED; --line:#E2E2E2; --line-2:#CFCFCF;
+  --bg:#F2F2F2; --surface:#FFF; --raised:#EDEDED; --line:#d6d6d6; --line-2:#CFCFCF;
   --muted:#9A9A9A; --secondary:#585A5A; --primary:#1C1C1C; --display:#000;
-  --dotbg:rgba(0,0,0,.42); --glass:rgba(255,255,255,.96); --glass-brd:rgba(0,0,0,.08);
+  --dotbg:rgba(0,0,0,.42); --glass:#f2f2f2; --glass-brd:rgba(0,0,0,.08);
   /* light mode: signal red holds on white; foreground variant darkened slightly for text/border/icon contrast */
-  --accent:#D71921; --accent-text:#C2141C;
+  --accent:#636363; --accent-text:#C2141C;
   /* status colors darkened for readable foreground on light surfaces */
-  --success:#3D8B4A; --warning:#9C6B00; --error:#D23B30;
+  --success:#28953a; --warning:#d69200; --error:#D23B30;
 }

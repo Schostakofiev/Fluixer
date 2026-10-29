@@ -76,7 +76,7 @@ def create_app(config=None):
 
     @app.get('/<path:asset>')
     def asset(asset):
-        allowed = asset in {'obstacle.js', 'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'pipe-renderer.js', 'style.css'}
+        allowed = asset in {'quick-guide.js', 'motion-12.23.24.js', 'motion-LICENSE.txt', 'obstacle.js', 'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'pipe-renderer.js', 'style.css'}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('svg/*.svg')}
         allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}

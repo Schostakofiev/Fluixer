@@ -377,6 +377,14 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     photoPointer = null;
     queueMicrotask(() => { photoHistory.held = false; commitPhotoHistory(); });
   });
+  // The guide uses the real import/measurement controls, then restores the photo session.
+  api.beginGuide = () => {
+    const state=capturePhotoEdit(), undo=photoHistory.undo.slice(), redo=photoHistory.redo.slice(), current=photoHistory.current;
+    return () => {
+      photoHistory.restore(state);
+      photoHistory.undo=undo;photoHistory.redo=redo;photoHistory.current=current;
+    };
+  };
   for (const name of ['change', 'click']) dialog.addEventListener(name, () => queueMicrotask(commitPhotoHistory));
   dialog.addEventListener('keydown', event => {
     const action = FluixerHistory.shortcut(event);

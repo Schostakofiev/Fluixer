@@ -121,7 +121,7 @@ select.inp {
 }
 :where(button, input, select, canvas):focus-visible {
   outline: 2px solid var(--primary);
-  outline-offset: 4px;
+  outline-offset: 2px;
 }
 .inp:focus-visible {
   outline: 2px solid var(--primary);
@@ -145,7 +145,6 @@ select.inp {
 }
 .primary {
   width: 100%;
-  justify-content: space-between;
   margin-top: 24px;
 }
 .note {
@@ -226,8 +225,8 @@ canvas:active {
   background: var(--secondary);
 }
 .playback {
-  padding: 24px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  /* border-bottom: 1px solid var(--line); */
 }
 .playback select {
   max-width: 128px;
@@ -236,8 +235,8 @@ canvas:active {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  padding: 24px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  /* border-bottom: 1px solid var(--line); */
 }
 .metrics div {
   border-right: 1px solid var(--line);
@@ -385,7 +384,6 @@ canvas:active {
   flex-direction: column;
   gap: 8px;
   padding: 8px;
-  background: var(--glass);
   border-radius: var(--r-md);
 }
 .view-tools-left {
@@ -683,7 +681,7 @@ aside {
 .sidebar-panel .btn,
 .sidebar-panel .inp {
   min-height: 34px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-radius: var(--r-sm);
 }
 .sidebar-panel .note {
@@ -786,7 +784,7 @@ aside {
   #panel-pipe .inp,
   #panel-pipe .btn {
     min-height: 28px;
-    padding: 3px 8px;
+    padding: 4px 8px;
   }
 }
 
@@ -912,7 +910,7 @@ aside {
 #view-compensated { flex: none; border-radius: var(--r-pill); }
 #view-compensated[aria-pressed="true"] { background: var(--display); color: var(--bg); }
 .view-mode-divider { flex: 0 0 1px; width: 1px; height: 16px; background: var(--line); }
-.export-original { width: 100%; justify-content: space-between; margin-top: 8px; }
+.export-original { width: 100%; margin-top: 8px; }
 
 /* External SVG artwork retains its viewBox and follows the selected button state. */
 .button-svg { object-fit: contain; flex: none; pointer-events: none; }
@@ -928,16 +926,8 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
   gap: 8px;
   margin-top: 12px;
 }
-.serial-output-actions .btn {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-}
-.serial-output-actions .ico {
-  width: 16px;
-  height: 16px;
-  flex: none;
-}
+.serial-output-actions .btn { width: 100%; }
+
 .csv-import-actions .btn {
   width: 100%;
   min-width: 0;
@@ -1047,3 +1037,19 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
 
 /* Interactive collision object */
 .obstacle-controls .btn { width: 100%; margin-top: 8px; }
+
+/* Shared text-left, icon-right button layout. */
+.btn.btn-trailing-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+.btn-trailing-icon > .ico {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-left: auto;
+}
+.btn-primary > .button-svg { filter: invert(1); }

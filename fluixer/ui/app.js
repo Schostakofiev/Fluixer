@@ -38,9 +38,10 @@ let obstacleData = null, obstacleMesh = null, obstacleEditing = false, obstacleR
 let interactivePins = [], interactiveTool = null, interactiveStiffness = .2;
 let selectedInteractivePin = null;
 let interactivePreviewDirty=false,interactivePreviewTimer=null;
+const DEFAULT_VIEW_YAW = -Math.PI / 4, DEFAULT_VIEW_PITCH = Math.atan(1 / Math.sqrt(2));
 let display = null,
-  yaw = -0.55,
-  pitch = 0.25,
+  yaw = DEFAULT_VIEW_YAW,
+  pitch = DEFAULT_VIEW_PITCH,
   zoom = 1,
   panX = 0,
   panY = 0,
@@ -85,13 +86,31 @@ function selectedPreAdd() {
     throw Error('Pre-Add must be between 0 and 10000 mm');
   return value;
 }
+function selectedMachine(validateLengths = true) {
+  return {
+    pre_add: validateLengths ? selectedPreAdd() : Number($('pre-add').value),
+    length_per_100_steps: validateLengths ? selectedStepLength() : Number($('length-per-100-steps').value),
+    speed: Number($('speed').value),
+    k_gas: Number($('k-gas').value),
+    k_liquid: Number($('k-liquid').value),
+    unit: $('unit').value,
+  };
+}
+function machinePreviewSettings(machine) {
+  return { kGas: machine.k_gas, kLiquid: machine.k_liquid,
+    lengthPer100Steps: machine.length_per_100_steps, preAdd: machine.pre_add, unit: machine.unit };
+}
 function setPreAdd(value) {
   $('pre-add').value = value;
 }
 setPreAdd(730);
-function syncPlayback() {
+function syncAppControls() {
+  window.FluixerTour?.sync();
   syncCsvControls();
   syncSpatialControls();
+  syncPlayback();
+}
+function syncPlayback() {
   const play = $('playback-play');
   play.classList.toggle('is-playing', animationPlaying);
   play.ariaLabel = play.title = animationPlaying ? 'Pause' : 'Play';
@@ -296,15 +315,17 @@ var currentOutputCache;
 function syncCurrentOutput() {
   const el = $('current-output-value');
   const unitLabel = $('current-output-unit');
-  unitLabel.textContent = $('unit').value === 'segments' ? 'segments' : 'steps';
-  if (interactivePreviewDirty || !display || previewLoading || projectBusy || csvReading) { el.textContent = '—'; return; }
   const unit = $('unit').value === 'segments' ? 'segments' : 'steps';
+  if (interactivePreviewDirty || !display || previewLoading || projectBusy || csvReading) {
+    el.textContent = '—';
+    unitLabel.textContent = unit;
+    return;
+  }
   let timeline;
   if (importedCsv) {
     timeline = { commands: importedCsv.outputCommands, total: importedCsv.previewTotal };
   } else {
-    const settings = { kGas: $('k-gas').value, kLiquid: $('k-liquid').value,
-      lengthPer100Steps: $('length-per-100-steps').value, preAdd: $('pre-add').value, unit };
+    const settings = machinePreviewSettings(selectedMachine(false));
     const key = JSON.stringify(settings);
     if (currentOutputCache?.display !== display || currentOutputCache.key !== key)
       currentOutputCache = { display, key, timeline: outputTimeline(display.segments, settings) };
@@ -528,8 +549,41 @@ function createProjector(w, h) {
     return [cx + xx * scale, cy - zz * scale, depth];
   };
 }
-function project(point, w, h) {
-  return createProjector(w, h)(point);
+function drawWorldGrid(rect, projectPoint) {
+  const scale = viewScale(rect.width, rect.height);
+  if (!Number.isFinite(scale) || scale <= 0) return;
+  // Grid coordinates remain anchored to world XY (Z = 0), never to the model.
+  const target = 24 / scale;
+  const power = 10 ** Math.floor(Math.log10(target));
+  const step = [1, 2, 5, 10].find(n => n * power >= target) * power;
+  const center = modelFrame().center;
+  const reach = Math.hypot(rect.width, rect.height, panX * 2, panY * 2) / scale;
+  const extent = Math.max(modelFrame().extent, reach);
+  const radius = Math.min(150, Math.ceil(extent / step));
+  const ix = Math.round(center[0] / step), iy = Math.round(center[1] / step);
+  const x0 = (ix - radius) * step, x1 = (ix + radius) * step;
+  const y0 = (iy - radius) * step, y1 = (iy + radius) * step;
+  const line = (a, b) => {
+    const p = projectPoint(a), q = projectPoint(b);
+    ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+  };
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = uiColor('secondary', '#585A5A');
+  for (let i = -radius; i <= radius; i++) {
+    ctx.globalAlpha = (ix + i) % 5 === 0 ? .16 : .07;
+    line([(ix + i) * step, y0, 0], [(ix + i) * step, y1, 0]);
+    ctx.globalAlpha = (iy + i) % 5 === 0 ? .16 : .07;
+    line([x0, (iy + i) * step, 0], [x1, (iy + i) * step, 0]);
+  }
+  ctx.globalAlpha = .45;
+  ctx.strokeStyle = '#ae5947'; line([x0, 0, 0], [x1, 0, 0]);
+  ctx.strokeStyle = '#55815b'; line([0, y0, 0], [0, y1, 0]);
+  const origin = projectPoint([0, 0, 0]);
+  ctx.fillStyle = uiColor('secondary', '#585A5A');
+  ctx.font = canvasFont(11);
+  ctx.fillText('0', origin[0] + 5, origin[1] + 13);
+  ctx.restore();
 }
 function draw() {
   syncPrintExport();
@@ -546,6 +600,7 @@ function draw() {
   const projectPoint = createProjector(rect.width, rect.height);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
+  drawWorldGrid(rect, projectPoint);
   // World-axis triad uses the same projection as the geometry, never mirrors data.
   const center = modelFrame().center,
     origin = projectPoint(center),
@@ -873,7 +928,19 @@ function samePipe(a, b) {
   );
 }
 let pipeKind = 'cylinder';
+function setPipeControlRanges() {
+  const type = $('pipe-type').value;
+  for (const id of ['pipe-wind', 'pipe-slider-wind']) $(id).max = type === 'hilbert' ? 6 : 64;
+  for (const id of ['pipe-radius', 'pipe-slider-radius']) {
+    $(id).min = type === 'cylinder' ? 1 : 2;
+    $(id).max = type === 'cylinder' ? 500 : 1000;
+  }
+}
 function pipeLabels() {
+  setPipeControlRanges();
+  syncPipeView();
+}
+function syncPipeView() {
   const calibrationAvailable = ['cylinder', 's-curve'].includes($('pipe-type').value);
   $('tab-calibration').disabled = !calibrationAvailable;
   if (!calibrationAvailable && !$('panel-calibration').hidden) {
@@ -881,7 +948,6 @@ function pipeLabels() {
   }
   const isS = $('pipe-type').value !== 'cylinder',
     isH = $('pipe-type').value === 'hilbert';
-  for (const id of ['pipe-wind', 'pipe-slider-wind']) $(id).max = isH ? 6 : 64;
   const custom = $('pipe-type').value === 'custom-step';
   const interactive = $('pipe-type').value === 'interactive';
   $('interactive-fields').hidden = !interactive;
@@ -890,10 +956,6 @@ function pipeLabels() {
   for (const n of ['radius', 'height', 'wind']) $('pipe-' + n + '-field').hidden = custom || interactive;
   $('pipe-radius-label').textContent = isS ? 'Width (mm)' : 'Radius (mm)';
   $('pipe-wind-label').textContent = isH ? 'Order' : isS ? 'Passes' : 'Windings';
-  for (const id of ['pipe-radius', 'pipe-slider-radius']) {
-    $(id).min = isS ? 2 : 1;
-    $(id).max = isS ? 1000 : 500;
-  }
   for (const n of pipeNames) syncSliderFill($('pipe-slider-' + n));
 }
 function setPipe(c) {
@@ -915,13 +977,13 @@ function setPipe(c) {
   $('plane-toggle').ariaPressed = String(planeVisible);
   pipeKind = c.type || 'cylinder';
   $('pipe-type').value = pipeKind;
-  pipeLabels();
+  setPipeControlRanges();
   for (const n of pipeNames) {
     const value = n === 'radius' && pipeKind !== 'cylinder' ? c[n] * 2 : c[n];
     $('pipe-' + n).value = value;
     $('pipe-slider-' + n).value = value;
   }
-  pipeLabels();
+  syncPipeView();
   syncRenderControls();
 }
 $('pipe-type').addEventListener('change', () => {
@@ -933,7 +995,7 @@ $('pipe-type').addEventListener('change', () => {
     planeDrag = null;
   }
   if (next !== pipeKind) pipeCenter = null;
-  pipeLabels();
+  setPipeControlRanges();
   if (next !== pipeKind) {
     const input = $('pipe-radius'),
       v = Number(input.value);
@@ -943,7 +1005,7 @@ $('pipe-type').addEventListener('change', () => {
     $('pipe-slider-radius').value = input.value;
     pipeKind = next;
   }
-  pipeLabels();
+  syncPipeView();
   loadDisplay();
 });
 function pipeAvailability() {
@@ -1071,11 +1133,18 @@ function patternType() {
   const kind=$('pattern-type').value;
   return kind==='brush'&&$('brush-mode').value==='3d'?'spatial-brush':kind;
 }
-function resetBrushTools() {
-  brushErase = null;
-  spatialErase = null;
-  syncBrushTool();
-  syncSpatialControls();
+function syncPatternFields() {
+  const type = patternType();
+  for (const [id, mode] of [
+    ['spatial-fields', 'spatial-brush'],
+    ['image-fields', 'image'],
+    ['brush-fields', 'brush'],
+    ['step-fields', 'step'],
+  ]) $(id).hidden = type !== mode;
+}
+function resetBrushTools(selectPen = false) {
+  brushErase = selectPen && patternType() === 'brush' ? false : null;
+  spatialErase = selectPen && patternType() === 'spatial-brush' ? false : null;
 }
 function syncBrushMode(openPlane=false) {
   $('brush-mode-fields').hidden=$('pattern-type').value!=='brush';
@@ -1086,7 +1155,9 @@ function syncBrushMode(openPlane=false) {
     $('plane-tool').value='';
   }
   if(patternType()==='spatial-brush')planeHandles=[];
-  syncViewEditTools();syncPlaneTools();
+  syncBrushTool();
+  syncSpatialControls();
+  syncPlaneTools();
 }
 function selectedPattern() {
   if (patternType() === 'spatial-brush')
@@ -1625,7 +1696,7 @@ function finishBrush(cancel = false, silent = false) {
   if (!silent) {clearTimeout(brushPreviewTimer);brushPreviewTimer=null;flushBrushPreview();}
 }
 canvas.addEventListener('pointerdown',e=>{
-  if(patternType()!=='brush'||brushErase===null||!planeVisible||e.button!==0||e.isPrimary===false||brushStroke||projectBusy||exporting||importedCsv)return;
+  if($('panel-pattern').hidden||patternType()!=='brush'||brushErase===null||!planeVisible||e.button!==0||e.isPrimary===false||brushStroke||projectBusy||exporting||importedCsv)return;
   const mapping=brushPlaneMapping(),point=brushPoint(e,mapping);if(!point)return;
   e.preventDefault();e.stopImmediatePropagation();
   brushStroke={id:e.pointerId,before:brushPixels.slice(),point,mapping,
@@ -2007,7 +2078,7 @@ function loadDisplay() {
     $('project-open').disabled = false;
     for (const id of ['total', 'current-output-value', 'count']) $(id).textContent = '—';
     status('');
-    syncPlayback();
+    syncAppControls();
     draw();
     return Promise.resolve();
   }
@@ -2025,7 +2096,7 @@ function loadDisplay() {
       previewQueued = false;
       if(!interactiveDrag&&!obstacleDrag)loadDisplay();
     } else {
-      syncPlayback();
+      syncAppControls();
       startCalibPreview();
     }
   });
@@ -2036,11 +2107,8 @@ async function renderDisplay(current) {
   if (importedCsv) stopAnimation(false);
   else resetAnimation(false);
   pipeAvailability();
-  $('spatial-fields').hidden = patternType() !== 'spatial-brush';
-  $('image-fields').hidden = patternType() !== 'image';
-  $('brush-fields').hidden = patternType() !== 'brush';
-  $('step-fields').hidden = patternType() !== 'step';
-  syncPlayback();
+  syncPatternFields();
+  syncAppControls();
   draw();
   setExportDisabled(true);
   $('project-save').disabled = true;
@@ -2087,7 +2155,7 @@ async function renderDisplay(current) {
     setExportDisabled(exporting || pending || requestedPattern.type === 'empty');
     $('project-save').disabled = pending;
     $('project-open').disabled = pending;
-    syncPlayback();
+    syncAppControls();
     draw();
   } catch (error) {
     if (current === requestId) {
@@ -2100,16 +2168,15 @@ async function renderDisplay(current) {
   }
 }
 $('pattern-type').addEventListener('change', () => {
-  finishBrush(true,true);resetBrushTools();syncBrushMode(true);
+  finishBrush(true,true);resetBrushTools(true);syncBrushMode(true);
   spatialStroke = null;
-  canvas.style.cursor = patternType() === 'spatial-brush' && spatialErase !== null ? 'crosshair' : '';
   loadDisplay();
 });
-$('brush-mode').addEventListener('change',()=>{finishBrush(true,true);spatialStroke=null;resetBrushTools();syncBrushMode(true);loadDisplay();});
+$('brush-mode').addEventListener('change',()=>{finishBrush(true,true);spatialStroke=null;resetBrushTools(true);syncBrushMode(true);loadDisplay();});
 $('reset').addEventListener('click', () => {
   endDrag();
-  yaw = -0.55;
-  pitch = 0.25;
+  yaw = DEFAULT_VIEW_YAW;
+  pitch = DEFAULT_VIEW_PITCH;
   zoom = 1;
   panX = 0;
   panY = 0;
@@ -2190,7 +2257,7 @@ function drawObstacle(rect) {
   }).sort((a,b)=>b.depth-a.depth);
   ctx.save();ctx.lineWidth=.5;ctx.strokeStyle='rgba(90,96,100,.12)';ctx.fillStyle='rgba(150,158,165,.16)';
   for(const {p} of triangles){ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);ctx.lineTo(p[1][0],p[1][1]);ctx.lineTo(p[2][0],p[2][1]);ctx.closePath();ctx.fill();ctx.stroke();}
-  for(const axis of obstacleAxes(rect)){
+  for(const axis of ($('panel-pipe').hidden ? [] : obstacleAxes(rect))){
     const color=['#ae5947','#55815b','#47778e'][axis.k];
     ctx.strokeStyle=ctx.fillStyle=color;ctx.lineWidth=2;
     ctx.beginPath();ctx.moveTo(axis.origin[0],axis.origin[1]);ctx.lineTo(axis.end[0],axis.end[1]);ctx.stroke();
@@ -2216,7 +2283,7 @@ function drawObstacle(rect) {
   ctx.restore();
 }
 canvas.addEventListener('pointerdown',e=>{
-  if(e.button!==0||!e.isPrimary||!obstacleEditing||!obstacleData||projectBusy||csvReading||exporting)return;
+  if($('panel-pipe').hidden||e.button!==0||!e.isPrimary||!obstacleEditing||!obstacleData||projectBusy||csvReading||exporting)return;
   const rect=canvas.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;
   const hit=obstacleHandles.map(h=>({...h,distance:Math.hypot(x-h.x,y-h.y)}))
     .filter(h=>h.distance<12).sort((a,b)=>a.distance-b.distance)[0];
@@ -2324,7 +2391,7 @@ function markInteractiveEditing() {
   clearTimeout(interactivePreviewTimer);interactivePreviewTimer=null;
   interactivePreviewDirty=true;
   ++requestId;previewQueued=false;
-  setExportDisabled(true);syncPlayback();$('count').textContent='—';
+  setExportDisabled(true);syncAppControls();$('count').textContent='—';
 }
 function scheduleInteractivePreview() {
   clearTimeout(interactivePreviewTimer);
@@ -2365,8 +2432,9 @@ for(const id of ['interactive-radius','interactive-radius-value']) $(id).addEven
 });
 syncSliderFill($('interactive-radius'));
 function syncViewEditTools() {
-  const interactive=$('pipe-type').value==='interactive';
-  const spatial=patternType()==='spatial-brush',brush=patternType()==='brush';
+  const pipeTab=!$('panel-pipe').hidden, patternTab=!$('panel-pattern').hidden;
+  const interactive=pipeTab && $('pipe-type').value==='interactive';
+  const spatial=patternTab && patternType()==='spatial-brush',brush=patternTab && patternType()==='brush';
   $('brush-mode-fields').hidden=$('pattern-type').value!=='brush';
   $('brush-view-tools').hidden=!brush;
   $('interactive-view-tools').hidden=!interactive;
@@ -2395,7 +2463,7 @@ function syncInteractiveControls() {
   syncSliderFill($('interactive-length'));
 }
 function drawInteractivePins(rect) {
-  if($('pipe-type').value!=='interactive')return;
+  if($('panel-pipe').hidden||$('pipe-type').value!=='interactive')return;
   const projectPoint=createProjector(rect.width,rect.height);
   ctx.save();ctx.globalAlpha=1;ctx.lineWidth=1.7;
   ctx.strokeStyle=uiColor('accent-text','#C2141C');ctx.fillStyle=uiColor('surface','#FFFFFF');
@@ -2696,6 +2764,9 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     if (interactiveDrag&&!interactiveDrag.released) return;
+    const rect = canvas.getBoundingClientRect(), previousZoom = zoom;
+    const cursorX = e.clientX - rect.left - rect.width / 2;
+    const cursorY = e.clientY - rect.top - rect.height / 2;
     zoom = Math.max(
       0.1,
       Math.min(
@@ -2703,6 +2774,10 @@ canvas.addEventListener(
         zoom * Math.exp(-e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 500 : 1) * 0.001),
       ),
     );
+    // Keep the world point under the cursor fixed, including at zoom limits.
+    const ratio = zoom / previousZoom;
+    panX = cursorX - (cursorX - panX) * ratio;
+    panY = cursorY - (cursorY - panY) * ratio;
     requestViewDraw();
   },
   { passive: false },
@@ -2742,12 +2817,7 @@ async function requestOutputCsv(compensated) {
       cylinder: display.cylinder || DEFAULT_PIPE,
       compensation: compensated ? selectedCurve() : uncompensatedPreviewCurve(),
       pattern: display.pattern_config || { type: 'captured-s' },
-      pre_add: selectedPreAdd(),
-      length_per_100_steps: selectedStepLength(),
-      speed: Number($('speed').value),
-      k_gas: Number($('k-gas').value),
-      k_liquid: Number($('k-liquid').value),
-      unit: $('unit').value,
+      ...selectedMachine(),
     };
     const response = await fetch('/api/export', {
       method: 'POST',
@@ -2898,14 +2968,7 @@ function currentProject() {
       type: pipe.type || 'cylinder',
       mapping: pipe.mapping || 'projection',
     },
-    machine: {
-      pre_add: selectedPreAdd(),
-      length_per_100_steps: selectedStepLength(),
-      speed: Number($('speed').value),
-      k_gas: Number($('k-gas').value),
-      k_liquid: Number($('k-liquid').value),
-      unit: $('unit').value,
-    },
+    machine: selectedMachine(),
     view: {
       plane_visible: planeVisible,
       render: { mode: renderMode, inner: innerDiameter },
@@ -2948,13 +3011,12 @@ function restoreProject(project, data) {
   $('pattern-type').value = shape.type==='spatial-brush'?'brush':shape.type;
   $('brush-mode').value=shape.type==='spatial-brush'?'3d':'2d';
   syncBrushMode(shape.type==='brush');
-  $('spatial-fields').hidden = shape.type !== 'spatial-brush';
+  syncPatternFields();
   if (shape.type === 'spatial-brush') {
     spatialWindows = shape.windows.map((w) => w.slice());
 
   }
   pipeAvailability();
-  $('image-fields').hidden = shape.type !== 'image';
   if (shape.type === 'image') {
     imageReadId++;
     imageProcessId++;
@@ -2965,9 +3027,7 @@ function restoreProject(project, data) {
     imageActive = shape.source === null ? null : shape;
     paintImage();
   }
-  $('brush-fields').hidden = shape.type !== 'brush';
   if (shape.type === 'brush') restoreBrush(shape);
-  $('step-fields').hidden = shape.type !== 'step';
   if (shape.type === 'step') {
     stepActive = shape.source === null ? null : shape;
     stepDraft = null;
@@ -3027,7 +3087,7 @@ $('project-file').addEventListener('change', async () => {
   projectBusy = true;
   ++stepReadId;
   stepBusy = false;
-  syncPlayback();
+  syncAppControls();
   const previousDisplay = display;
   ++requestId;
   endDrag();
@@ -3094,9 +3154,8 @@ $('project-file').addEventListener('change', async () => {
       'Open failed; previous configuration retained: ' + error.message;
   } finally {
     projectBusy = false;
-    syncPlayback();
     for (const id of controls) $(id).disabled = false;
-    syncCsvControls();
+    syncAppControls();
     pipeAvailability();
     paintBrush();
     $('step-apply').disabled = !stepDraft;
@@ -3187,18 +3246,14 @@ function rotationDragStep(h, x, y) {
   h.turn = (h.turn || 0) + delta;
   return (h.turn * 180) / Math.PI;
 }
-function worldAxisRotation(rotation, axis, degrees, local = false) {
+function localAxisRotation(rotation, axis, degrees) {
   const delta = [0, 0, 0];
   delta[axis] = degrees;
   const c = [
     [1, 0, 0],
     [0, 1, 0],
     [0, 0, 1],
-  ].map((v) =>
-    local
-      ? rotatePlane(rotatePlane(v, delta), rotation)
-      : rotatePlane(rotatePlane(v, rotation), delta),
-  );
+  ].map((v) => rotatePlane(rotatePlane(v, delta), rotation));
   const y = Math.asin(Math.max(-1, Math.min(1, -c[0][2]))),
     regular = Math.abs(Math.cos(y)) > 1e-7;
   return [
@@ -3212,9 +3267,6 @@ function objectAxis(rotation, axis) {
     [0, 1, 2].map((i) => (i === axis ? 1 : 0)),
     rotation,
   );
-}
-function localAxisRotation(rotation, axis, degrees) {
-  return worldAxisRotation(rotation, axis, degrees, true);
 }
 function depthFromDrag(depth, dx, dy, unit, travel, maxDepth) {
   if (travel < 1e-6) return depth;
@@ -3707,6 +3759,7 @@ canvas.addEventListener(
   (e) => {
     if (
       e.button !== 0 ||
+      $('panel-pattern').hidden ||
       patternType() !== 'spatial-brush' ||
       spatialErase === null ||
       importedCsv ||
@@ -3728,7 +3781,7 @@ canvas.addEventListener(
       map: spatialHitMap(
         display,
         rect,
-        (p) => project(p, rect.width, rect.height),
+        createProjector(rect.width, rect.height),
         viewScale(rect.width, rect.height),
       ),
       x: e.clientX - rect.left,
@@ -3819,7 +3872,7 @@ function selectSidebarTab(key, focus = false) {
         importedCsv = calibPreviousPreview.sequence;
         animationProgress = calibPreviousPreview.progress;
         csvPreviewMetrics();
-        syncPlayback();
+        syncAppControls();
       }
       draw();
     }
@@ -3830,6 +3883,8 @@ function selectSidebarTab(key, focus = false) {
     calibPreviewPending = true;
     startCalibPreview();
   }
+  syncViewEditTools();
+  requestViewDraw();
   if (key === 'calibration') drawCurve(curveState);
   if (key === 'pattern') {
     paintBrush();
@@ -3935,7 +3990,7 @@ function clearCsvPreview() {
   csvPreviewMetrics();
   setExportDisabled(!display || exporting || projectBusy || previewLoading || display.pattern_config?.type === 'empty');
   $('project-save').disabled = !display || projectBusy || previewLoading || display.pattern_config?.type === 'empty';
-  syncCsvControls();
+  syncAppControls();
 }
 $('csv-import').addEventListener('click', () => {
   if (display && !projectBusy && !previewLoading && !exporting && !csvReading) $('csv-file').click();
@@ -3946,12 +4001,12 @@ $('csv-file').addEventListener('change', async () => {
   if (!file || !display || projectBusy || previewLoading || exporting || csvReading) return;
   const token = ++csvReadId, sourceDisplay = display, sourceRequest = requestId;
   csvReading = true;
-  syncCsvControls();
+  syncAppControls();
   $('csv-import-status').hidden = true;
   $('csv-import-status').textContent = 'Reading CSV…';
   try {
     if (file.size > 4194304) throw Error('CSV exceeds the 4 MB limit');
-    const settings = { kGas: $('k-gas').value, kLiquid: $('k-liquid').value, preAdd: selectedPreAdd(), lengthPer100Steps: selectedStepLength() };
+    const settings = machinePreviewSettings(selectedMachine());
     const source = await file.text();
     if (token !== csvReadId || sourceDisplay !== display || sourceRequest !== requestId || projectBusy) return;
     const parsed = parsePreviewCsv(source, settings);
@@ -3963,7 +4018,7 @@ $('csv-file').addEventListener('change', async () => {
     $('csv-import-status').title = `k_Gas: ${parsed.kGas}; k_Liquid: ${parsed.kLiquid}; 100 Steps Length: ${parsed.lengthPer100Steps} mm; Pre-Add excluded from preview: ${parsed.omittedPreAdd} mm. Normalized preview timing.`;
     $('export-status').textContent = '';
     csvPreviewMetrics();
-    syncPlayback();
+    syncAppControls();
     draw();
   } catch (error) {
     if (token === csvReadId) {
@@ -3973,13 +4028,13 @@ $('csv-file').addEventListener('change', async () => {
   } finally {
     if (token === csvReadId) {
       csvReading = false;
-      syncPlayback();
+      syncAppControls();
       startCalibPreview();
     }
   }
 });
 $('csv-preview-clear').addEventListener('click', () => { clearCsvPreview(); draw(); });
-syncCsvControls();
+syncAppControls();
 
 
 FluixerCalibration.init({
@@ -3998,13 +4053,11 @@ FluixerCalibration.init({
 
 // STANDARD_PREVIEW_START
 async function fetchStandardPattern(compensation = selectedCurve(), cylinder = selectedPipe()) {
+  const { speed, k_gas, pre_add, length_per_100_steps } = selectedMachine();
   const payload = {
     cylinder,
     compensation,
-    speed: Number($('speed').value),
-    k_gas: Number($('k-gas').value),
-    pre_add: selectedPreAdd(),
-    length_per_100_steps: selectedStepLength(),
+    speed, k_gas, pre_add, length_per_100_steps,
   };
   const response = await fetch('/api/calibration-standard', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -4032,7 +4085,7 @@ async function startCalibPreview() {
   const token = ++csvReadId, sourceDisplay = display, sourceRequest = requestId;
   csvReading = true;
   $('calibration-standard-status').textContent = '';
-  syncPlayback();
+  syncAppControls();
   try {
     const standard = await fetchStandardPattern();
     if (token !== csvReadId || $('panel-calibration').hidden || projectBusy) return;
@@ -4052,7 +4105,7 @@ async function startCalibPreview() {
     if (token === csvReadId) {
       calibPreviewReading = false;
       csvReading = false;
-      syncPlayback();
+      syncAppControls();
       startCalibPreview();
     }
   }
@@ -4062,7 +4115,7 @@ $('calibration-standard').addEventListener('click', async () => {
   if (projectBusy || (importedCsv && !importedCsv.standard) || csvReading || exporting || previewLoading ||
       !['cylinder', 's-curve'].includes($('pipe-type').value)) return;
   exporting = true;
-  syncCsvControls();
+  syncAppControls();
   $('calibration-standard-status').textContent = '';
   try {
     // Export the exact sequence being previewed, if preview mode is active.
@@ -4074,7 +4127,7 @@ $('calibration-standard').addEventListener('click', async () => {
     $('calibration-standard-status').textContent = error.message;
   } finally {
     exporting = false;
-    syncCsvControls();
+    syncAppControls();
     startCalibPreview();
   }
 });
@@ -4140,6 +4193,7 @@ function restoreEditState(s) {
   loadDisplay();
 }
 function commitEditHistory() {
+  if(window.FluixerTour?.active)return;
   if (!editHistory || projectBusy || csvReading || imageHistoryPending || interactiveDrag || obstacleDrag || obstacleBusy) return;
   editHistory.checkpoint();
 }

@@ -14,6 +14,9 @@
     <script src="/obstacle.js" defer></script>
     <script src="/interactive-constraints.js" defer></script>
     <script src="/app.js" defer></script>
+    <link rel="stylesheet" href="/css/quick-guide.css" />
+    <script src="/motion-12.23.24.js" defer></script>
+    <script src="/quick-guide.js" defer></script>
   </head>
   <body>
     <header>
@@ -32,16 +35,7 @@
           >
             Project
           </button>
-          <button
-            id="tab-pattern"
-            type="button"
-            role="tab"
-            aria-controls="panel-pattern"
-            aria-selected="false"
-            tabindex="-1"
-          >
-            Pattern
-          </button>
+
           <button
             id="tab-pipe"
             type="button"
@@ -51,6 +45,16 @@
             tabindex="-1"
           >
             Pipe
+          </button>
+          <button
+            id="tab-pattern"
+            type="button"
+            role="tab"
+            aria-controls="panel-pattern"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Pattern
           </button>
           <button
             id="tab-output"
@@ -428,13 +432,13 @@
                 <input class="inp" id="k-liquid" type="number" min="0" step="1" value="625" required />
               </div>
             </div>
-            <button id="export" class="btn btn-primary primary" type="submit" disabled>
+            <button id="export" class="btn-trailing-icon btn btn-primary primary" type="submit" disabled>
               Export Compensated CSV
-              <span>↓</span>
+              <img class="ico button-svg" src="/svg/download.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
-            <button id="export-original" class="btn btn-outline export-original" type="submit" disabled>
+            <button id="export-original" class="btn-trailing-icon btn btn-outline export-original" type="submit" disabled>
               Export Original CSV
-              <span>↓</span>
+              <img class="ico button-svg" src="/svg/download.svg" alt="" aria-hidden="true" draggable="false" />
             </button>
             <p id="export-status" class="note" role="status"></p>
           </fieldset>
@@ -449,8 +453,8 @@
             <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
             <p class="note" id="csv-import-status" role="status" hidden></p>
             <div class="serial-output-actions" id="serial-generated">
-              <button class="btn btn-primary" id="serial-compensated" type="button" disabled>Run Compensated<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
-              <button class="btn btn-outline" id="serial-original" type="button" disabled>Run Original<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+              <button class="btn-trailing-icon btn btn-primary" id="serial-compensated" type="button" disabled>Run Compensated<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+              <button class="btn-trailing-icon btn btn-outline" id="serial-original" type="button" disabled>Run Original<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
             </div>
             <progress id="serial-progress" value="0" max="1" aria-label="Serial execution progress"></progress>
             <div class="playback-controls serial-playback">
@@ -502,11 +506,11 @@
                   <img class="ico button-svg" src="/svg/view-print.svg" alt="" aria-hidden="true" draggable="false" />
                 </button>
                 <button id="print-export" class="btn-icon" type="button" title="Export STEP" aria-label="Export STEP" hidden disabled>
-                  <img class="ico button-svg" src="/svg/export-step.svg" alt="" aria-hidden="true" draggable="false" />
+                  <img class="ico button-svg" src="/svg/download.svg" alt="" aria-hidden="true" draggable="false" />
                 </button>
               </div>
             </div>
-            <button class="btn btn-outline reset-button" id="reset" type="button"><img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" />Reset View</button>
+            <button class="btn-trailing-icon btn btn-outline reset-button" id="reset" type="button">Reset View<img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" /></button>
           </div>
         </div>
           <div id="view-edit-tools" class="view-tools view-tools-left" hidden>
@@ -707,7 +711,7 @@
       <div class="calibration-dialog-heading">
         <h2 id="calibration-title">Visual Calibration</h2>
         <button class="btn-icon" id="calibration-close" type="button" aria-label="Close" title="Close">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          <img class="ico button-svg" src="/svg/close.svg" alt="" aria-hidden="true" draggable="false" />
         </button>
       </div>
       <fieldset class="csv-edit-controls calibration-dialog-content">
