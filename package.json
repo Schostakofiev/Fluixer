@@ -1,0 +1,12 @@
+{
+  "name": "fluixer-ui-tests",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:unit && npm run test:browser",
+    "test:unit": "node tests/run.cjs",
+    "test:browser": "node tests/test_browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

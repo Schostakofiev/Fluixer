@@ -1,12 +1,11 @@
 (() => {
   const steps = [
-    {tab:'pipe', group:0, title:'1. Pipe', label:'Choose a curve', demo:'choose', text:'Open Pipeline Curve and choose a path. This example selects S-Curve. STEP imports a path; Interactive lets you shape one.', focus:'Choose the path before adding a pattern.', role:'INPUT · 1 / 2'},
-    {tab:'pipe', group:0, title:'1. Pipe', label:'Adjust the dimensions', demo:'size', text:'Drag the size slider or enter an exact value. Radius / Width and Height set the overall size; inner and outer diameter describe the pipe.', focus:'Radius / Width and Height control the overall pipe dimensions.', role:'INPUT · 2 / 2'},
-    {tab:'pattern', group:1, title:'2. Pattern', label:'Paint on the plane · 2D', demo:'brush2d', text:'Choose Brush, then 2D. The plane opens and the brush is selected. Paint on the plane to create liquid segments; use the eraser to remove marks.', focus:'Brush → 2D → paint on the projection plane.', role:'PATTERN · 1 / 2'},
-    {tab:'pattern', group:1, title:'2. Pattern', label:'Paint on the pipe · 3D', demo:'brush3d', text:'Switch to 3D to paint directly on the visible pipe. The brush does not penetrate hidden pipe sections. Brush size appears beside the selected tool.', focus:'Paint the visible pipe; rotate the view to reach other sides.', role:'PATTERN · 2 / 2'},
-    {tab:'output', group:2, title:'3. Serial / CSV', label:'Connect a serial device', demo:'serial', text:'Click Connect, select the device in the browser port chooser and confirm. Without imported CSV, choose Run Original or Run Compensated. With CSV imported, run that file.', focus:'Demonstration only — no device request or command is sent.', role:'OUTPUT · SIMULATION'},
-    {tab:'calibration', group:3, title:'4. Calib', label:'Photo calibration', demo:'reference', text:'Output the 100-step leveling pattern, photograph it, then open Photo Calibration. Import the photo, mark the 80 mm reference, sample the liquid color and inspect the detected endpoints. Apply the detected compensation.', focus:'This sample image runs through the real recognition and compensation calculation.', role:'CALIBRATION · 1 / 2'},
-    {tab:'calibration', group:3, title:'4. Calib', label:'Apply and refine the curve', demo:'curve', text:'Apply the measurements to Geometric Compensation, then drag control points to refine the curve. Click the curve to add a point; Alt-click a point to delete it.', focus:'Use compensated preview to inspect the result, then export compensated CSV.', role:'CALIBRATION · 2 / 2'},
+    {tab:'pipe', title:'1. Pipe', label:'Choose a curve', demo:'choose', text:'Open Pipeline Curve to view the available paths. STEP imports a path; Interactive lets you shape one.', focus:'Choose the path before adding a pattern.', role:'INPUT · 1 / 2'},
+    {tab:'pipe', title:'1. Pipe', label:'Adjust the dimensions', demo:'size', text:'Drag the size slider or enter an exact value. Radius / Width and Height set the overall size; inner and outer diameter describe the pipe.', focus:'Radius / Width and Height control the overall pipe dimensions.', role:'INPUT · 2 / 2'},
+    {tab:'pattern', title:'2. Pattern', label:'Paint on the plane · 2D', demo:'brush2d', text:'Choose Brush, then 2D. The plane opens and the brush is selected. Paint on the plane to create liquid segments; use the eraser to remove marks.', focus:'Brush → 2D → paint on the projection plane.', role:'PATTERN · 1 / 2'},
+    {tab:'pattern', title:'2. Pattern', label:'Paint on the pipe · 3D', demo:'brush3d', text:'Switch to 3D to paint directly on the visible pipe. The brush does not penetrate hidden pipe sections. Brush size appears beside the selected tool.', focus:'Paint the visible pipe; rotate the view to reach other sides.', role:'PATTERN · 2 / 2'},
+    {tab:'output', title:'3. Serial', label:'Connect a serial device', demo:'serial', text:'Click Connect, select the device in the browser port chooser and confirm. Choose Run Original or Run Compensated to output the current pattern.', focus:'Demonstration only — no device request or command is sent.', role:'OUTPUT · SIMULATION'},
+    {tab:'calibration', title:'4. Calib', label:'Photo calibration and curve refinement', demo:'reference', text:'Output the 100-step leveling pattern, photograph it, then open Photo Calibration. Import the photo, mark the 80 mm reference and inspect the detected endpoints. Apply the compensation, then drag a control point to refine the curve.', focus:'Example detection results demonstrate the compensation workflow.', role:'CALIBRATION'},
   ];
   const help = document.createElement('button');
   help.id='tour-help'; help.className='btn-icon'; help.type='button';
@@ -15,37 +14,42 @@
   dialog.innerHTML=`<div class="tour-spotlight" aria-hidden="true"></div><div class="tour-cursor" aria-hidden="true"><img src="/svg/cursor.svg" alt="" draggable="false" /></div><div class="tour-target" aria-hidden="true"></div>
     <section class="tour-card">
       <div class="tour-heading"><span id="tour-role"></span><button class="btn-icon" type="button" id="tour-close" aria-label="Close guide"><img class="ico button-svg" src="/svg/close.svg" alt="" aria-hidden="true" draggable="false" /></button></div>
-      <div class="tour-progress"><div></div></div>
-      <div id="tour-content" aria-live="polite"><h2 id="tour-title"></h2><h3 id="tour-subtitle"></h3><p id="tour-text"></p><p id="tour-note"></p><div class="tour-demo-bar"><span id="tour-demo-caption"></span><button type="button" class="btn-icon" id="tour-replay" aria-label="Replay demonstration" title="Replay demonstration"><img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" /></button></div><div id="tour-focus"></div></div>
-      <footer class="tour-actions"><button class="btn btn-outline" id="tour-back" type="button">Back</button><span id="tour-count"></span><button class="btn btn-primary" id="tour-next" type="button">Next</button></footer>
+      <div class="tour-progress" role="progressbar" aria-label="Guide progress" aria-valuemin="0" aria-valuemax="${steps.length}">${steps.map(()=>'<span aria-hidden="true"></span>').join('')}</div>
+      <div id="tour-content" aria-live="polite"><h2 id="tour-title"></h2><h3 id="tour-subtitle"></h3><p id="tour-text" class="note"></p><p id="tour-note" class="note"></p><div class="tour-demo-bar"><span id="tour-demo-caption"></span><button type="button" class="btn-icon" id="tour-replay" aria-label="Replay demonstration" title="Replay demonstration"><img class="ico button-svg" src="/svg/reset.svg" alt="" aria-hidden="true" draggable="false" /></button></div><div id="tour-focus"></div></div>
+      <footer class="tour-actions"><button class="btn btn-outline" id="tour-back" type="button">Back</button><button class="btn btn-primary" id="tour-next" type="button">Next</button></footer>
     </section>`;
   document.body.append(help,dialog);
   const find=id=>dialog.querySelector('#'+id), card=dialog.querySelector('.tour-card'), spot=dialog.querySelector('.tour-spotlight');
-  let index=0, saved=null, frame=null, animations=[], demoEpoch=0, demoRestore=[], spotlightTarget=null, internalCloses=0;
+  let index=0, saved=null, frame=null, animations=[], demoEpoch=0, demoRestore=[], phase='sidebar', internalCloses=0;
   const virtualCursor=dialog.querySelector('.tour-cursor'), targetRing=dialog.querySelector('.tour-target');
   const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
   function animate(el,values,options={}) {
     if(window.Motion) animations.push(Motion.animate(el,values,{...options,duration:reduced()?0:(options.duration??.28)}));
     else for(const [key,value] of Object.entries(values)) el.style[key]=Array.isArray(value)?value.at(-1):value;
   }
-  function stopAnimations(){card.classList.remove('tour-card-photo');$('calibration-dialog').classList.remove('tour-photo-active');spotlightTarget=null;++demoEpoch;for(const a of animations)a.stop();animations=[];for(const restore of demoRestore.reverse())restore();demoRestore=[];targetRing.hidden=true;virtualCursor.hidden=true;}
+  function stopAnimations(){phase='sidebar';$('calibration-dialog').classList.remove('tour-photo-active');++demoEpoch;for(const a of animations)a.stop();animations=[];for(const restore of demoRestore.reverse())restore();demoRestore=[];targetRing.hidden=true;virtualCursor.hidden=true;}
+  // The demonstration chooses its layout phase; DOM ancestry never advances it.
+  function setPhase(next) {
+    phase=next;
+    layout();
+  }
   function layout() {
     if(!dialog.open)return;
+    dialog.dataset.phase=phase;
     const sidebar=document.querySelector('aside'), viewport=document.querySelector('.viewport');
-    const region=spotlightTarget?.closest('#calibration-dialog') ||
-      (spotlightTarget?.closest('.viewport') ? viewport :
-        spotlightTarget?.id==='curve-preview' ? spotlightTarget : sidebar);
-    spot.hidden=region===viewport;
-    const photo=region.id==='calibration-dialog';
-    card.classList.toggle('tour-card-photo',photo);
+    const region={sidebar,viewport,photo:$('calibration-dialog'),curve:curveCanvas}[phase];
+    const brushDemo=['brush2d','brush3d'].includes(steps[index].demo);
+    const photo=phase==='photo';
+    spot.hidden=(phase==='viewport'&&!brushDemo)||(photo&&!region.open);
     $('calibration-dialog').classList.toggle('tour-photo-active',photo);
-    const rect=region.getBoundingClientRect(),side=sidebar.getBoundingClientRect();
+    const rect=photo&&!region.open
+      ? {left:16,top:16,right:innerWidth-Math.min(440,innerWidth*.34)-32,bottom:innerHeight-16}
+      : region.getBoundingClientRect(),side=sidebar.getBoundingClientRect();
     const pad=6,left=Math.max(4,rect.left-pad),top=Math.max(4,rect.top-pad);
     Object.assign(spot.style,{left:left+'px',top:top+'px',width:Math.max(0,Math.min(innerWidth-left-4,rect.right+pad-left))+'px',height:Math.max(0,Math.min(innerHeight-top-4,rect.bottom+pad-top))+'px'});
     spot.dataset.region=region===viewport?'viewport':region.id||'sidebar';
     if(photo){
       Object.assign(card.style,{width:Math.min(440,innerWidth*.34)+'px',left:(rect.right+16)+'px',top:rect.top+'px'});
-      card.classList.remove('tour-card-compact');
       return;
     }
     const inView=region===viewport;
@@ -53,7 +57,6 @@
     const fits=rect.right+28+width<=innerWidth-12;
     card.style.left=(inView?Math.max(12,side.left+10):fits?rect.right+28:Math.max(12,(innerWidth-width)/2))+'px';
     card.style.top=Math.max(12,Math.min((innerHeight-card.offsetHeight)/2,innerHeight-card.offsetHeight-12))+'px';
-    card.classList.toggle('tour-card-compact',!fits);
   }
 
   function showStep() {
@@ -64,12 +67,14 @@
     find('tour-focus').textContent=step.focus;
     find('tour-note').textContent=step.tab==='calibration'&&$('tab-calibration').disabled?'Calib is available for Cylinder Helix and S-Curve only. This guide does not change your selected pipe.':'';
     find('tour-back').disabled=index===0;find('tour-next').textContent=index===steps.length-1?'Finish':'Next';
-    find('tour-count').textContent=`${index+1} / ${steps.length}`;
     playDemo(step.demo);
     layout();
     card.scrollTop=0;
     animate(find('tour-content'),{opacity:[0,1],transform:['translateY(10px)','translateY(0)']});
-    animate(dialog.querySelector('.tour-progress div'),{width:`${(index+1)/steps.length*100}%`});
+    const progress=dialog.querySelector('.tour-progress');
+    progress.setAttribute('aria-valuenow',String(index+1));
+    progress.setAttribute('aria-valuetext',`${index+1} / ${steps.length}`);
+    [...progress.children].forEach((segment,i)=>segment.classList.toggle('is-complete',i<=index));
   }
   // Use normal control handlers and calculations. Restore the project on exit.
   // Serial actions remain demonstration-only.
@@ -79,15 +84,23 @@
     const setValue=(id,value)=>{const el=$(id);el.value=String(value);el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true}));};
     const current=()=>epoch===demoEpoch&&dialog.open;
     async function settled(){
-      while(current()&&(previewLoading||previewQueued||calibPreviewReading))await new Promise(resolve=>setTimeout(resolve,50));
+      while(current()&&(previewLoading||previewQueued||calibrationPreview.reading))await new Promise(resolve=>setTimeout(resolve,50));
       return current();
     }
     const pause=ms=>new Promise(resolve=>setTimeout(resolve,reduced()?50:ms));
     async function point(id,description,action,fx=.5,fy=.5) {
       if(epoch!==demoEpoch||!dialog.open)return false;
-      const el=typeof id==='string'?$(id):id;el.scrollIntoView({block:'nearest'});
+      const el=typeof id==='string'?$(id):id;
+      if(phase==='photo'){
+        const controls=el.closest('.calibration-photo-controls');
+        if(controls){
+          const r=el.getBoundingClientRect(),c=controls.getBoundingClientRect();
+          if(r.top<c.top)controls.scrollTop+=r.top-c.top;
+          else if(r.bottom>c.bottom)controls.scrollTop+=r.bottom-c.bottom;
+        }
+      }else el.scrollIntoView({block:'nearest'});
       targetRing.hidden=el===canvas||el===curveCanvas||el.id==='calibration-photo';
-      spotlightTarget=el.dataset.guideSource?$(el.dataset.guideSource):el;layout();
+      layout();
       const r=el.getBoundingClientRect(),x=r.left+r.width*fx,y=r.top+r.height*fy;
       caption.textContent=description;
       Object.assign(targetRing.style,{left:(r.left-4)+'px',top:(r.top-4)+'px',width:(r.width+8)+'px',height:(r.height+8)+'px'});
@@ -117,13 +130,14 @@
       const source=$(id),rect=source.getBoundingClientRect(),style=getComputedStyle(source);
       const list=source.cloneNode(true);
       list.removeAttribute('id');list.removeAttribute('name');list.removeAttribute('hidden');
-      list.className='tour-select-list';list.dataset.guideSource=id;
+      list.className='tour-select-list';
       list.size=Math.max(2,list.options.length);list.disabled=false;list.tabIndex=-1;
       list.setAttribute('aria-hidden','true');
       for(const property of ['fontFamily','fontSize','fontWeight','lineHeight','letterSpacing','color','direction'])list.style[property]=style[property];
       const height=Math.min(list.options.length*28+4,innerHeight-24);
       Object.assign(list.style,{position:'fixed',left:Math.max(8,Math.min(rect.left,innerWidth-rect.width-8))+'px',top:Math.max(8,Math.min(rect.bottom,innerHeight-height-8))+'px',width:rect.width+'px',height:height+'px'});
       dialog.append(list);demoRestore.push(()=>list.remove());
+      if(value===null){await pause(850);return current();}
       const optionIndex=[...list.options].findIndex(option=>option.value===value);
       const ok=await point(list,description,()=>{list.value=value;setValue(id,value);},.45,(optionIndex+.5)/list.options.length);
       list.remove();if(ok)targetRing.hidden=true;return ok&&await settled();
@@ -131,15 +145,16 @@
     async function run() {
       if(!await settled())return;
       if(kind==='choose') {
-        if(!await selectOption('pipe-type','s-curve','Select S-Curve'))return;
-        spotlightTarget=$('pipe-type');layout();targetRing.hidden=true;
-        caption.textContent='S-Curve preview';
+        if(!await selectOption('pipe-type',null,'Open Pipeline Curve'))return;
+        targetRing.hidden=true;
+        caption.textContent='Available pipe curves';
       } else if(kind==='size') {
         await point('pipe-radius','Pipe width / radius');
         if(current())await point('pipe-height','Pipe height');
       } else if(kind==='brush2d'||kind==='brush3d') {
         if(!await selectOption('pattern-type','brush','Choose Brush'))return;
         if(!await selectOption('brush-mode',kind==='brush2d'?'2d':'3d',kind==='brush2d'?'Choose 2D':'Choose 3D'))return;
+        setPhase('viewport');
         const group=kind==='brush2d'?'brush':'spatial',pen=$(group+'-pen');
         if(!await point(pen,'Select the brush',()=>{if(pen.ariaPressed!=='true')pen.click();}))return;
         if(!await point('preview','Draw directly in the view'))return;
@@ -166,44 +181,56 @@
         if(!current())return;
         if(mapping){clearTimeout(brushPreviewTimer);brushPreviewTimer=null;flushBrushPreview();}
         else await loadDisplay();
-        await settled();
+        if(!await settled()||!current())return;
+        if(kind==='brush2d'&&planeVisible){
+          if(!await point('plane-toggle','Hide the projection plane',()=>{
+            if(planeVisible)$('plane-toggle').click();
+          }))return;
+        }
       } else if(kind==='serial') {
         await point('serial-connect','Click Connect — demonstration only');
         if(epoch===demoEpoch)await point('serial-compensated','After selecting your port, run compensated data');
-        if(epoch===demoEpoch)await point('csv-import','Or import an existing CSV');
+
       } else if(kind==='reference') {
         if(!await point('calibration-open','Open Photo Calibration'))return;
         const photoDialog=$('calibration-dialog'),wasOpen=photoDialog.open;
         if(!wasOpen){
+          setPhase('photo');
           $('calibration-open').click();
-          if(!photoDialog.open){caption.textContent='Photo Calibration requires Cylinder Helix or S-Curve and an unlocked project.';return;}
+          if(!photoDialog.open){setPhase('sidebar');caption.textContent='Photo Calibration requires Cylinder Helix or S-Curve and an unlocked project.';return;}
           demoRestore.push(()=>photoDialog.close());
           // Keep the guide above the real modal without moving or restyling it.
           internalCloses++;dialog.close();dialog.showModal();
         }
+        setPhase('photo');
         if(!await point('calibration-file-open','Import a sample calibration image',async()=>{
-          const bars=Array.from({length:10},(_,i)=>`<rect x="${180+20*Math.sin(i*.7)}" y="${90+i*34}" width="100" height="12" rx="6" fill="#edc600"/>`).join('');
-          const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480"><rect width="480" height="480" fill="white"/><rect x="40" y="40" width="400" height="400" rx="20" fill="#f3f3f3" stroke="#aaa"/>${bars}</svg>`;
-          const transfer=new DataTransfer();transfer.items.add(new File([svg],'guide-calibration.svg',{type:'image/svg+xml'}));
+          const response=await fetch('/images/calibration-guide.jpg');
+          if(!response.ok)throw Error('Calibration example image could not be loaded');
+          const photoBlob=await response.blob();if(!current())return;
+          const transfer=new DataTransfer();transfer.items.add(new File([photoBlob],'calib.jpg',{type:'image/jpeg'}));
           $('calibration-file').files=transfer.files;$('calibration-file').dispatchEvent(new Event('change',{bubbles:true}));
           const deadline=Date.now()+15000;
           while(current()&&$('calibration-photo').hidden&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,50));
           if(current()&&$('calibration-photo').hidden)throw Error('Sample image did not load');
+          if(!current())return;
+          // Recorded endpoints are a guide fixture, never used by normal photo detection.
+          const endpoints=[[553,457],[559,484],[559,512],[570,540],[581,566],[561,594],[570,621],[559,648],[554,676],[558,704],[571,732],[568,759],[529,786]];
+          FluixerCalibration.setGuideEndpoints(endpoints.map(([x,y])=>({x:x/1036,y:y/1079})));
         }))return;
         if(!await point('calibration-scale-pick','Mark the 80 mm reference',()=>$('calibration-scale-pick').click()))return;
         const photo=$('calibration-photo');
-        const photoClick=(x,y)=>{const r=photo.getBoundingClientRect();photo.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+r.width*x,clientY:r.top+r.height*y}));};
-        if(!await point(photo,'First reference point',()=>photoClick(40/480,50/480),40/480,50/480))return;
-        if(!await point(photo,'Second reference point',()=>photoClick(440/480,50/480),440/480,50/480))return;
-        if(!await point('calibration-pick-color','Sample the liquid color',()=>$('calibration-pick-color').click()))return;
-        if(!await point(photo,'Sample a liquid segment',()=>photoClick(220/480,96/480),220/480,96/480))return;
+        const photoClick=(x,y)=>{if(![x,y].every(v=>Number.isFinite(v)&&v>=0&&v<=1))throw Error('Guide photo point is outside the image');const r=photo.getBoundingClientRect();photo.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:r.left+r.width*x,clientY:r.top+r.height*y}));};
+        if(!await point(photo,'First reference point',()=>photoClick(217/1036,320/1079),217/1036,320/1079))return;
+        if(!await point(photo,'Second reference point',()=>photoClick(721/1036,320/1079),721/1036,320/1079))return;
         await new Promise(resolve=>setTimeout(resolve,200));if(!current())return;
-        if($('calibration-apply').disabled)throw Error($('calibration-error').textContent||'No calibration result');
-        if(!await point('calibration-apply','Apply the measured compensation',()=>{
-          $('calibration-apply').click();spotlightTarget=$('curve-preview');layout();targetRing.hidden=true;
+        if($('calibration-apply').disabled)throw Error($('calibration-error').textContent||'Example compensation is unavailable');
+        if(!await point('calibration-apply','Apply the example compensation',()=>{
+          $('calibration-apply').click();
+          curveCanvas.scrollIntoView({block:'nearest'});
+          targetRing.hidden=true;
+          setPhase('curve');
         }))return;
-        await settled();
-      } else {
+        if(!await settled())return;
         const initial=selectedCurve(),middle=Math.floor(initial.y.length/2);
         await drag('curve-preview','Drag a control point to refine compensation',.35,.65,t=>{
           const curve=structuredClone(initial);curve.y[middle]=Math.max(-1,Math.min(1,initial.y[middle]+.35*t));
@@ -212,19 +239,18 @@
           virtualCursor.style.top=(rect.top+(24+240*curve.x[middle])/280*rect.height)+'px';
           setCurve(curve);loadDisplay();
         });if(!await settled())return;
-        await settled();
       }
-      if(epoch===demoEpoch)caption.textContent+=' · Replay to watch again';
+
     }
     find('tour-replay').disabled=false;
     run().catch(error=>{if(epoch===demoEpoch)caption.textContent='Guide paused: '+error.message;});
   }
-  function available(){return !projectBusy&&!previewLoading&&!csvReading&&!exporting&&!interactiveDrag&&!obstacleDrag&&!brushStroke&&!planeDrag;}
+  function available(){return !projectBusy&&!previewLoading&&!calibrationPreview.reading&&!csvReading&&!exporting&&!interactiveDrag&&!obstacleDrag&&!brushStroke&&!planeDrag;}
   function sync(){help.disabled=!available();}
   function open(){
     if(dialog.open||!available())return;
-    saved={photoRestore:FluixerCalibration.beginGuide(),edit:captureEditState(),runtime:{importedCsv,calibPreviousPreview,compensatedPreview,planeVisible,planeTool:$('plane-tool').value,brushErase,spatialErase,animationProgress,yaw,pitch,zoom,panX,panY},focus:document.activeElement,tabs:sidebarTabKeys.map(key=>({key,hidden:$('panel-'+key).hidden,selected:$('tab-'+key).ariaSelected,tabIndex:$('tab-'+key).tabIndex})),scroll:[...document.querySelectorAll('.sidebar-panel')].map(el=>[el,el.scrollTop])};
-    stopAnimation();importedCsv=null;calibPreviousPreview=null;calibPreviewPending=false;calibPreviewReading=false;index=0;dialog.showModal();showStep();find('tour-next').focus();
+    saved={photoRestore:FluixerCalibration.beginGuide(),edit:captureEditState(),runtime:{importedCsv,calibration:{...calibrationPreview},compensatedPreview,planeVisible,planeTool:$('plane-tool').value,brushErase,spatialErase,animationProgress,yaw,pitch,zoom,panX,panY},focus:document.activeElement,tabs:sidebarTabKeys.map(key=>({key,hidden:$('panel-'+key).hidden,selected:$('tab-'+key).ariaSelected,tabIndex:$('tab-'+key).tabIndex})),scroll:[...document.querySelectorAll('.sidebar-panel')].map(el=>[el,el.scrollTop])};
+    stopAnimation();importedCsv=null;stopCalibPreview(false);index=0;dialog.showModal();showStep();find('tour-next').focus();
   }
   function close(){if(dialog.open)dialog.close();}
   dialog.addEventListener('close',()=>{
@@ -232,10 +258,11 @@
     stopAnimations();if(!saved)return;
     clearTimeout(brushPreviewTimer);brushPreviewTimer=null;
     cancelAnimationFrame(spatialRefresh);clearTimeout(spatialRefresh);spatialRefresh=null;
-    calibPreviewPending=false;calibPreviewReading=false;
+    stopCalibPreview(false);
     saved.photoRestore();
     const original=saved.runtime;
-    importedCsv=original.importedCsv;calibPreviousPreview=original.calibPreviousPreview;
+    importedCsv=original.importedCsv;
+    Object.assign(calibrationPreview,original.calibration,{requestId:calibrationPreview.requestId,reading:false});
     compensatedPreview=original.compensatedPreview;planeVisible=original.planeVisible;$('plane-tool').value=original.planeTool;
     brushErase=original.brushErase;spatialErase=original.spatialErase;
     yaw=original.yaw;pitch=original.pitch;zoom=original.zoom;panX=original.panX;panY=original.panY;

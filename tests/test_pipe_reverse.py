@@ -7,7 +7,7 @@ class ReversePathTests(unittest.TestCase):
     def test_all_curve_types(self):
         for kind in ('cylinder','s-curve','hilbert','interactive','custom-step'):
             config={'type':kind,'radius':40,'diameter':4,'height':75,'wind':2,'center':[3,4,5]}
-            if kind=='interactive':config.update(points=[[0,0,0],[40,0,0],[80,0,0]],target_length=80,pins=[0],stiffness=.2,avoid_collisions=True)
+            if kind=='interactive':config.update(points=[[0,0,0],[40,0,0],[80,0,0]],target_length=80,pins=[0],stiffness=.2)
             if kind=='custom-step':config.update(source='test centerline')
             with patch('fluixer.pipe_step.parse_pipe_step',return_value={'points':((0,0,0),(20,0,0),(20,30,0))}):
                 c=cylinder_settings(config);forward=pipe_path(c);backward=pipe_path(replace(c,reverse=True))

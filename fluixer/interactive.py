@@ -48,10 +48,9 @@ def segment_distance(a,b,c,d):
     return math.dist(mix(a,b,s),mix(c,d,t))
 
 
-def check_constraints(path,diameter,target_length=None,avoid_collisions=True):
+def check_constraints(path,diameter,target_length=None):
     if target_length is not None and abs(path.length-target_length)>max(1e-5,target_length*1e-7):
         raise ValueError('Interactive curve no longer matches its locked length')
-    if not avoid_collisions:return
     # Capsule contact tolerance matches the browser solver. Curvature is not a
     # collision constraint; only non-neighbouring pipe portions are obstacles.
     tolerance=min(.02,diameter*.002)

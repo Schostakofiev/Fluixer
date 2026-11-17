@@ -38,3 +38,10 @@ const auto=api.autoSettings(scene.data,scene.w,scene.h);
 assert.equal(api.detect(scene.data,scene.w,scene.h,auto).length,4,'repeated liquid rows beat a larger colored background');
 assert.equal(api.detect(photo([220,220,220]),20,20,api.autoSettings(photo([220,220,220]),20,20)).length,0,'neutral photo does not invent a color');
 console.log('PASS: automatic red, blue, green, yellow, purple, cyan, orange, dark blue, shading and colored background rejection.');
+
+const {referenceScale}=require('../fluixer/ui/visual-calibration.js');
+assert.equal(referenceScale([{x:0,y:0},{x:60,y:80}]).mmPerPixel,.8);
+assert.equal(referenceScale([{x:220,y:10},{x:20,y:10}]).mmPerPixel,.4);
+assert.throws(()=>referenceScale([]));
+assert.throws(()=>referenceScale([{x:5,y:5},{x:5,y:5}]));
+console.log('PASS: 80mm two-point Euclidean scale, reversed endpoints and invalid reference rejection.');

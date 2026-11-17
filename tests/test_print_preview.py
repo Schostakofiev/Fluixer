@@ -2,7 +2,7 @@ import unittest,math
 from fluixer.print_preview import print_payload
 class PrintPreviewTests(unittest.TestCase):
     def test_rotated_box_and_channel(self):
-        c={'type':'interactive','radius':40,'diameter':4,'height':75,'wind':2,'points':[[0,0,0],[20,20,0],[40,40,0]],'target_length':math.sqrt(3200),'pins':[],'stiffness':.2,'avoid_collisions':True}
+        c={'type':'interactive','radius':40,'diameter':4,'height':75,'wind':2,'points':[[0,0,0],[20,20,0],[40,40,0]],'target_length':math.sqrt(3200),'pins':[],'stiffness':.2}
         result=print_payload({'cylinder':c,'inner':2})
         self.assertLess(math.prod(result['size']),44*44*4)
         self.assertEqual(len(result['vertices'])%18,0)

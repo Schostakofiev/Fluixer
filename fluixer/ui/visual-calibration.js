@@ -211,6 +211,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     setPicking(!picking);
   });
   dialog.addEventListener('close', () => {setPicking(false);setScalePicking(false);});
+  let guideEndpoints = null;
   let photo = null, automatic = [], manual = [], scale = null, result = null, timer = null, readId = 0, reading = false;
   function resetParameters() {
     for (const id of keys) {
@@ -253,9 +254,14 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     $('result').textContent = ''; $('error').textContent = '';
     if (!photo || reading) return;
     try {
-      automatic = api.detect(photo.data, photo.width, photo.height, settings());
+      const guiding = window.FluixerTour?.active;
+      // Reveal guide detections only after the two reference points are valid.
+      if (guiding) { automatic = []; scale = api.referenceScale(scalePoints); }
+      automatic = guideEndpoints && guiding
+        ? guideEndpoints.map(p=>({...p}))
+        : api.detect(photo.data, photo.width, photo.height, settings());
       const selected = points();
-      scale = api.referenceScale(scalePoints);
+      scale ??= api.referenceScale(scalePoints);
       result = api.measurement(selected, scale.mmPerPixel);
       $('result').textContent = `${selected.length} points · 80 mm / ${scale.pixels.toFixed(1)} px · ±${result.curve.amplitude.toFixed(2)} mm`;
       $('apply').disabled = locked(); $('download').disabled = locked();
@@ -276,7 +282,7 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
   $('file').addEventListener('change', async () => {
     const file = $('file').files[0]; $('file').value = '';
     if (!file || locked()) return;
-    const token = ++readId; reading = true; clearTimeout(timer); photo = null; automatic = []; manual = []; scale = null; result = null;
+    const token = ++readId; guideEndpoints=null; reading = true; clearTimeout(timer); photo = null; automatic = []; manual = []; scale = null; result = null;
     setPicking(false);setScalePicking(false);scalePoints=[];$('scale-pick').disabled=true; $('pick-color').disabled = true;
     canvas.hidden = true; $('apply').disabled = true; $('download').disabled = true;
     $('result').textContent = ''; $('error').textContent = '';
@@ -378,10 +384,16 @@ if (typeof window !== 'undefined') window.FluixerCalibration.init = function ({ 
     queueMicrotask(() => { photoHistory.held = false; commitPhotoHistory(); });
   });
   // The guide uses the real import/measurement controls, then restores the photo session.
+  api.setGuideEndpoints = points => {
+    if(!window.FluixerTour?.active || !photo)throw Error('Guide photo is not active');
+    if(!Array.isArray(points)||points.length<2||points.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.x>1||p.y<0||p.y>1))throw Error('Invalid guide endpoints');
+    guideEndpoints=points.map(p=>({x:p.x*photo.width,y:p.y*photo.height}));
+    $('mode').value='auto';refresh();
+  };
   api.beginGuide = () => {
     const state=capturePhotoEdit(), undo=photoHistory.undo.slice(), redo=photoHistory.redo.slice(), current=photoHistory.current;
     return () => {
-      photoHistory.restore(state);
+      guideEndpoints=null;photoHistory.restore(state);
       photoHistory.undo=undo;photoHistory.redo=redo;photoHistory.current=current;
     };
   };

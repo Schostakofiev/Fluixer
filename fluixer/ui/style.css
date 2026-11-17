@@ -19,6 +19,15 @@ header {
   border-bottom: 1px solid var(--line);
   background: var(--bg);
 }
+/* The title opens the project controls. */
+#project-menu { position: relative; flex: 0 0 auto; }
+#project-menu-toggle { display: block; cursor: pointer; list-style: none; }
+#project-menu-toggle::-webkit-details-marker { display: none; }
+#project-menu-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.project-menu-panel { position: absolute; top: calc(100% + 12px); left: 0; z-index: 30; width: min(300px, calc(100vw - 64px)); padding: 16px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--surface); }
+.project-menu-panel .project-tools { padding: 0; margin: 0; border: 0; }
+.project-menu-panel h2 { margin-top: 0; }
+.project-menu-panel .note { margin-bottom: 0; }
 .brand {
   
   font-family: var(--f-display);
@@ -404,17 +413,24 @@ canvas:active {
   padding-top: 8px;
 }
 .view-tools .btn-icon,
+.render-modes .btn-icon,
+#view-compensated,
+#reset,
 .playback-controls .btn-icon {
   border-radius: var(--r-pill);
   background: var(--surface);
 }
+.render-modes .btn-icon[aria-pressed="true"],
+#view-compensated[aria-pressed="true"],
 .view-tools .btn-icon[aria-pressed="true"],
 .playback-controls .btn-icon[aria-pressed="true"] {
   background: var(--display);
   color: var(--bg);
   border-color: var(--display);
 }
-.view-tools .btn-icon:hover:not(:disabled) {
+.view-tools .btn-icon:hover:not(:disabled),
+.render-modes .btn-icon:hover:not(:disabled),
+#view-compensated:hover:not(:disabled) {
   opacity: 0.8;
 }
 #print-export:disabled,
@@ -527,13 +543,6 @@ canvas:active {
 .render-modes {
   display: flex;
   gap: 6px;
-}
-.render-modes .btn-icon {
-  border-radius: var(--r-pill);
-}
-.render-modes [aria-pressed="true"] {
-  background: var(--ink, #111);
-  color: var(--bg, #fff);
 }
 #pipe-render-error:empty {
   display: none;
@@ -675,16 +684,19 @@ aside {
 .calibration-photo-controls label {
   margin: 10px 0 10px;
 }
-.sidebar-panel .pair {
+.sidebar-panel .pair,
+.project-menu-panel .pair {
   gap: 8px;
 }
+.project-menu-panel .btn,
 .sidebar-panel .btn,
 .sidebar-panel .inp {
   min-height: 34px;
   padding: 8px 12px;
   border-radius: var(--r-sm);
 }
-.sidebar-panel .note {
+.sidebar-panel .note,
+.project-menu-panel .note {
   margin-top: 8px;
 }
 .sidebar-panel #curve-preview,
@@ -711,7 +723,8 @@ aside {
   .sidebar-panel .slider {
     margin: 12px 0;
   }
-  .sidebar-panel .btn,
+  .project-menu-panel .btn,
+.sidebar-panel .btn,
   .sidebar-panel .inp {
     min-height: 30px;
     padding: 4px 8px;
@@ -719,14 +732,13 @@ aside {
 }
 
 /* === Calibration panel === */
-.sidebar-panel .visual-calibration-launch {
+.sidebar-panel .geometric-calibration-controls {
   margin-top: 20px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-/* Both Visual Calibration actions fill the same available row. */
-.visual-calibration-launch > .btn,
-.visual-calibration-launch .standard-leveling-actions > .btn {
+/* Photo calibration fills the same row as the shared serial actions. */
+.visual-calibration-launch > .btn {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -861,16 +873,6 @@ aside {
   opacity: 0.4;
 }
 
-/* Standard leveling command export shares the Calibration panel. */
-.standard-leveling-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  margin-top: 8px;
-}
-.standard-leveling-actions .btn {
-  min-width: 0;
-  padding-inline: 8px;
-}
 #calibration-standard-status { font: 11px var(--f-mono); line-height: 1.4; }
 #calibration-standard-status:empty { display: none; }
 @media (max-height: 800px) {
@@ -907,8 +909,8 @@ aside {
 .calibration-parameters-heading h2 { margin: 0; }
 
 /* Preview compensation is independent of render style and export choice. */
-#view-compensated { flex: none; border-radius: var(--r-pill); }
-#view-compensated[aria-pressed="true"] { background: var(--display); color: var(--bg); }
+#view-compensated { flex: none; }
+
 .view-mode-divider { flex: 0 0 1px; width: 1px; height: 16px; background: var(--line); }
 .export-original { width: 100%; margin-top: 8px; }
 
@@ -1018,8 +1020,6 @@ button[aria-pressed="true"] > .button-svg { filter: invert(1); }
   transform: translateY(-50%);
   width: 32px;
   height: 144px;
-  border-radius: var(--r-md);
-  background: var(--glass);
 }
 .brush-size-control[hidden] { display: none; }
 .brush-size-control .slider {

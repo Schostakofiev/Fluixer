@@ -1,7 +1,7 @@
 import math
 import unittest
 from fluixer.pipeline import cylinder_settings, cylinder_config, pipe_path
-from fluixer.webapp import preview, csv_payload
+from fluixer.service import preview, csv_payload
 from fluixer.interactive import validate_points
 
 class InteractiveTests(unittest.TestCase):
@@ -36,7 +36,11 @@ class InteractiveTests(unittest.TestCase):
         self.assertEqual(cylinder_settings(cylinder_config(c)),c)
         for pins in ([33],[True],[1,1],[-1]):
             with self.assertRaises(ValueError):cylinder_settings(dict(data,pins=pins))
-        with self.assertRaises(ValueError):cylinder_settings(dict(data,avoid_collisions=False))
+        for field,value in [('avoid_collisions',False),('avoid_collisions',True),('mapping','projection')]:
+            with self.subTest(field=field,value=value):
+                with self.assertRaises(ValueError):cylinder_settings(dict(data,**{field:value}))
+        self.assertNotIn('avoid_collisions',cylinder_config(c))
+        self.assertNotIn('mapping',cylinder_config(c))
 
     def test_reject_invalid(self):
         for points in ([],[[0,0,0]]*3,[[0,0,0],[1,0,0],[0,0,0]],[[0,0,0],[1,float('nan'),0],[2,0,0]]):
@@ -56,7 +60,8 @@ class InteractiveTests(unittest.TestCase):
         # Use slightly different endpoints to preserve the open-curve invariant.
         crossing[-1][0]+=.1
         with self.assertRaises(ValueError):check_constraints(interactive_path(crossing),4)
-        check_constraints(interactive_path(crossing),4,avoid_collisions=False)
+        # The public pipe path also enforces collisions without any opt-in switch.
+        with self.assertRaises(ValueError):pipe_path(self.pipe(crossing))
         tiny=interactive_path([[math.cos(i/32*math.pi),0,math.sin(i/32*math.pi)] for i in range(33)])
         check_constraints(tiny,4)  # Local curvature is no longer a collision veto.
 

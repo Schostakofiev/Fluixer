@@ -10,6 +10,7 @@
     <script src="/image-input.js" defer></script>
     <script src="/history.js" defer></script>
     <script src="/visual-calibration.js" defer></script>
+    <script src="/csv-commands.js" defer></script>
     <script src="/serial-controller.js" defer></script>
     <script src="/obstacle.js" defer></script>
     <script src="/interactive-constraints.js" defer></script>
@@ -20,22 +21,26 @@
   </head>
   <body>
     <header>
-      <a class="brand" href="/">FLUIXER {{VERSION}}</a>
+      <details id="project-menu">
+        <summary class="brand" id="project-menu-toggle" aria-label="Project menu" title="Project">FLUIXER {{VERSION}}</summary>
+          <div class="project-menu-panel">
+          <fieldset class="csv-edit-controls">
+          <section class="project-tools">
+            <h2>Project</h2>
+            <div class="pair">
+              <button class="btn btn-outline" id="project-open" type="button" disabled>Open</button>
+              <button class="btn btn-outline" id="project-save" type="button" disabled>Save</button>
+            </div>
+            <input class="" id="project-file" type="file" accept=".fluixer" hidden />
+            <p id="project-status" class="note" role="status">Fluixer-project.fluixer</p>
+          </section>
+        </fieldset>
+          </div>
+      </details>
     </header>
     <main>
       <aside>
         <nav class="sidebar-tabs" role="tablist" aria-label="Parameters">
-          <button
-            id="tab-project"
-            type="button"
-            role="tab"
-            aria-controls="panel-project"
-            aria-selected="false"
-            tabindex="-1"
-          >
-            Project
-          </button>
-
           <button
             id="tab-pipe"
             type="button"
@@ -77,25 +82,6 @@
             Calib
           </button>
         </nav>
-        <div
-          id="panel-project"
-          class="sidebar-panel"
-          role="tabpanel"
-          aria-labelledby="tab-project"
-          hidden
-        >
-          <fieldset class="csv-edit-controls">
-          <section class="project-tools">
-            <h2>Project</h2>
-            <div class="pair">
-              <button class="btn btn-outline" id="project-open" type="button" disabled>Open</button>
-              <button class="btn btn-outline" id="project-save" type="button" disabled>Save</button>
-            </div>
-            <input class="" id="project-file" type="file" accept=".fluixer" hidden />
-            <p id="project-status" class="note" role="status">Fluixer-project.fluixer</p>
-          </section>
-        </fieldset>
-        </div>
         <div id="panel-pattern" class="sidebar-panel" role="tabpanel" aria-labelledby="tab-pattern" hidden>
           <fieldset class="csv-edit-controls">
           <section>
@@ -362,6 +348,16 @@
         >
           <section id="geometry-compensation">
             <fieldset class="csv-edit-controls">
+            <section class="visual-calibration-launch">
+              <h2>Visual Calibration</h2>
+              <button class="btn btn-outline" id="calibration-open" type="button">Open Photo Calibration</button>
+              <div class="serial-output-actions">
+                <button class="btn btn-outline" id="calibration-connect" type="button">Connect</button>
+                <button class="btn-trailing-icon btn btn-primary" id="calibration-run" type="button" disabled>Run Calibration<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+              </div>
+              <p id="calibration-standard-status" role="status"></p>
+            </section>
+            <section class="geometric-calibration-controls">
             <div class="sidebar-section-heading">
               <h2>Geometric Compensation</h2>
               <button
@@ -392,14 +388,8 @@
               value="40"
             />
             <p class="note" id="curve-status"></p>
-            <section class="visual-calibration-launch">
-              <h2>Visual Calibration</h2>
-              <button class="btn btn-outline" id="calibration-open" type="button">Open Photo Calibration</button>
-              <div class="standard-leveling-actions">
-                <button class="btn btn-outline" id="calibration-standard" type="button">Export 100-Step Pattern</button>
-              </div>
-              <p id="calibration-standard-status" role="status"></p>
             </section>
+
             </fieldset>
           </section>
         </div>
@@ -491,15 +481,8 @@
               >
                 <img class="ico button-svg" src="/svg/view-lines.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
-              <button
-                id="view-render"
-                class="btn-icon"
-                type="button"
-                aria-label="Render"
-                title="Render"
-                aria-pressed="false"
-              >
-                <img class="ico button-svg" src="/svg/view-render.svg" alt="" aria-hidden="true" draggable="false" />
+              <button id="view-shaded" class="btn-icon" type="button" aria-label="Shaded" title="Shaded" aria-pressed="false">
+                <img class="ico button-svg" src="/svg/view-shaded.svg" alt="" aria-hidden="true" draggable="false" />
               </button>
               <div class="print-mode-tools">
                 <button id="view-print" class="btn-icon" type="button" aria-label="3D Print" title="3D Print" aria-pressed="false">
@@ -719,10 +702,14 @@
           <canvas id="calibration-photo" width="600" height="600" aria-label="Photo endpoints. In manual mode click to add a point; Alt-click to remove a point." hidden></canvas>
         </div>
         <div class="calibration-photo-controls">
-          <button class="btn btn-outline" id="calibration-file-open" type="button">Import Photo</button>
+          <div class="pair">
+            <button class="btn btn-outline" id="calibration-file-open" type="button">Import Photo</button>
+            <button class="btn btn-outline" id="calibration-pick-color" type="button" aria-pressed="false" disabled>Pick Color</button>
+          </div>
           <input id="calibration-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
-          <button class="btn btn-outline" id="calibration-pick-color" type="button" aria-pressed="false" disabled>Pick Color</button>
-          <button class="btn btn-outline" id="calibration-scale-pick" type="button" aria-pressed="false" disabled>Calibrate 80 mm</button>
+          <div class="serial-output-actions">
+            <button class="btn btn-outline" id="calibration-scale-pick" type="button" aria-pressed="false" disabled>Calibrate 80 mm</button>
+          </div>
           <label for="calibration-mode">Endpoints</label>
           <select class="inp" id="calibration-mode">
             <option value="auto">Automatic</option>

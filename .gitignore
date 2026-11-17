@@ -13,3 +13,6 @@ vendor/*
 outputs/
 releases/
 _migration_backups/
+
+# Local Node dependencies
+node_modules/

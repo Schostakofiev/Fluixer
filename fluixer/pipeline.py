@@ -19,7 +19,6 @@ class CylinderSettings:
     samples_per_turn: int = 150
     period: int = 1
     type: str = "cylinder"
-    mapping: str = "projection"
     placement: tuple | None = None
     source: str | None = None
     reverse: bool = False
@@ -27,21 +26,18 @@ class CylinderSettings:
     initial_placement: tuple | None = None
     points: tuple | None = None
     target_length: float | None = None
-    avoid_collisions: bool = True
     pins: tuple = ()
     stiffness: float = .2
 
 
 def cylinder_settings(value=None):
     if value is None:return CylinderSettings()
-    if not isinstance(value,dict) or not {'radius','diameter','height','wind'}<=set(value) or set(value)-{'radius','diameter','height','wind','type','mapping','placement','source','reverse','center','initial_placement','points','target_length','avoid_collisions','pins','stiffness'}:raise ValueError('Incomplete pipe parameters')
+    if not isinstance(value,dict) or not {'radius','diameter','height','wind'}<=set(value) or set(value)-{'radius','diameter','height','wind','type','placement','source','reverse','center','initial_placement','points','target_length','pins','stiffness'}:raise ValueError('Incomplete pipe parameters')
     radius,diameter,height,wind=(finite(value[n],n) for n in ('radius','diameter','height','wind'))
     if not 1<=radius<=500 or not .1<=diameter<=100 or not 1<=height<=1000 or wind!=int(wind) or not 1<=wind<=64:
         raise ValueError('Radius: 1–500 mm; diameter: 0.1–100 mm; height: 1–1000 mm; windings: integer 1–64')
     kind=value.get('type','cylinder')
     if kind not in ('cylinder','s-curve','hilbert','custom-step','interactive'):raise ValueError('Unsupported pipe type')
-    mapping=value.get('mapping','projection')
-    if mapping!='projection':raise ValueError('Invalid mapping method')
     if kind=='hilbert' and wind>6:raise ValueError('Hilbert order must be between 1 and 6')
     source=value.get('source');reverse=value.get('reverse',False)
     if not isinstance(reverse,bool):raise ValueError('Invalid pipe direction')
@@ -50,26 +46,23 @@ def cylinder_settings(value=None):
     elif source is not None:raise ValueError('This pipe type does not accept STEP centerlines')
     points=None
     target_length=None
-    avoid_collisions=True
     pins=()
     stiffness=.2
     if kind=='interactive':
         from .interactive import validate_points, interactive_path
         points=validate_points(value.get('points'))
-        target_length=value.get('target_length',interactive_path(points).length)
+        target_length=value['target_length'] if 'target_length' in value else interactive_path(points).length
         if target_length is not None:
             if isinstance(target_length,bool):raise ValueError('Invalid locked length')
             target_length=finite(target_length,'locked length')
             if target_length<=0:raise ValueError('Locked length must be positive')
-        avoid_collisions=value.get('avoid_collisions',True)
-        if avoid_collisions is not True:raise ValueError('Interactive collision checking is always enabled')
         pins=value.get('pins',[])
         if not isinstance(pins,(list,tuple)) or any(type(i) is not int or not 0<=i<len(points) for i in pins) or len(set(pins))!=len(pins):raise ValueError('Invalid Interactive pins')
         pins=tuple(pins)
         if isinstance(value.get('stiffness'),bool):raise ValueError('Invalid Interactive stiffness')
         stiffness=finite(value.get('stiffness',.2),'stiffness')
         if not 0<=stiffness<=1:raise ValueError('Stiffness must be between 0 and 1')
-    elif any(k in value for k in ('points','target_length','avoid_collisions','pins','stiffness')):raise ValueError('This pipe type does not accept editable points')
+    elif any(k in value for k in ('points','target_length','pins','stiffness')):raise ValueError('This pipe type does not accept editable points')
     center=value.get('center')
     if center is not None:
         if not isinstance(center,(list,tuple)) or len(center)!=3:raise ValueError('Pipe center must be a 3D coordinate')
@@ -77,13 +70,12 @@ def cylinder_settings(value=None):
         if any(abs(v)>1e6 for v in center):raise ValueError('Pipe center is out of range')
     from .projection import settings
     placement=settings(value.get('placement'))
-    return CylinderSettings(radius,diameter,height,int(wind),type=kind,mapping=mapping,placement=placement,source=source,reverse=reverse,center=center,initial_placement=settings(value.get('initial_placement')),points=points,target_length=target_length,avoid_collisions=avoid_collisions,pins=pins,stiffness=stiffness)
+    return CylinderSettings(radius,diameter,height,int(wind),type=kind,placement=placement,source=source,reverse=reverse,center=center,initial_placement=settings(value.get('initial_placement')),points=points,target_length=target_length,pins=pins,stiffness=stiffness)
 
 
 def cylinder_config(cylinder):
     result={n:getattr(cylinder,n) for n in ('radius','diameter','height','wind')}
     if cylinder.type!='cylinder':result['type']=cylinder.type
-    if cylinder.mapping!='projection':result['mapping']=cylinder.mapping
     if cylinder.placement is not None:
         from .projection import config
         result['placement']=config(cylinder.placement)
@@ -92,7 +84,7 @@ def cylinder_config(cylinder):
         result['initial_placement']=config(cylinder.initial_placement)
     result['reverse']=cylinder.reverse
     if cylinder.type=='custom-step':result.update(source=cylinder.source)
-    if cylinder.type=='interactive':result.update(points=cylinder.points,target_length=cylinder.target_length,avoid_collisions=cylinder.avoid_collisions,pins=cylinder.pins,stiffness=cylinder.stiffness)
+    if cylinder.type=='interactive':result.update(points=cylinder.points,target_length=cylinder.target_length,pins=cylinder.pins,stiffness=cylinder.stiffness)
     if cylinder.center is not None:result['center']=cylinder.center
     return result
 
@@ -100,7 +92,7 @@ def raw_pipe_path(c):
     if c.type=='interactive':
         from .interactive import interactive_path,check_constraints
         path=interactive_path(c.points)
-        check_constraints(path,c.diameter,c.target_length,c.avoid_collisions)
+        check_constraints(path,c.diameter,c.target_length)
         return path
     if c.type=='custom-step':
         from .pipe_step import step_path

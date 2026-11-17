@@ -1,0 +1,3 @@
+const assert=require('node:assert/strict');
+const {Controller}=require('../fluixer/ui/serial-controller.js');
+(async()=>{const events=[];const c=new Controller();c.ready=true;c.command=async()=>events.push('command');await c.run([{motor:'l',direction:'fwd',count:2,speed:625,unit:'segments'}],()=>{}, {move:r=>events.push(r.amount),settled:()=>events.push('ack'),complete:()=>events.push('complete')});assert.deepEqual(events,[67,'command','ack',67,'command','ack','complete']);console.log('PASS actual controller emits movement and ACK hooks per motor command');})().catch(e=>{console.error(e);process.exitCode=1});

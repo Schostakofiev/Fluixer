@@ -21,35 +21,8 @@
     if (!/^OK(?: |$)/.test(line)) throw Error('Unexpected device response');
     return line.slice(2).trim();
   }
-  function parse(source) {
-    if (source.length > 4194304) throw Error('CSV exceeds 4 MB');
-    const lines = source.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
-    const fields = line => line.split(',').map(v => v.trim().replace(/^"([^"\r\n]*)"$/, '$1'));
-    const header = fields(lines.shift());
-    const expected = ['type', 'motor', 'direction', 'steps', 'speed', 'unit', 'seconds'];
-    if (header.join(',') !== expected.join(',')) throw Error('Expected Fluixer CSV header: ' + expected.join(','));
-    const rows = [];
-    for (const [index, line] of lines.entries()) {
-      if (!line.trim()) continue;
-      const values = fields(line), row = Object.fromEntries(header.map((key, i) => [key, values[i]]));
-      const fail = () => { throw Error(`Invalid CSV row ${index + 2}`); };
-      if (values.length !== 7) fail();
-      if (row.type === 'delay') {
-        const seconds = Number(row.seconds);
-        if (!row.seconds || !Number.isFinite(seconds) || seconds <= 0 || seconds > 10) fail();
-        rows.push({ seconds });
-      } else if (row.type === 'move') {
-        const count = Number(row.steps), speed = Number(row.speed);
-        if (!['g', 'l'].includes(row.motor) || !['fwd', 'rev'].includes(row.direction) ||
-            !['steps', 'segments'].includes(row.unit) || !Number.isInteger(count) || count < 1 ||
-            count > (row.unit === 'steps' ? 2000 : 89) || !Number.isInteger(speed) || speed < 1 || speed > 625) fail();
-        rows.push({ motor: row.motor, direction: row.direction, count, speed, unit: row.unit });
-      } else fail();
-      if (rows.length > 100000) throw Error('CSV exceeds 100,000 rows');
-    }
-    if (!rows.length) throw Error('CSV is empty');
-    return rows;
-  }
+  const csvCommands=typeof module!=='undefined'?require('./csv-commands.js'):root.FluixerCsv;
+  function parse(source) { return csvCommands.validateDevice(csvCommands.parse(source)); }
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const STOPPED = Symbol('normal stop');
   class Controller {
@@ -136,7 +109,7 @@
       if (this.stopRequested) throw STOPPED;
       if (!this.running) throw Error('Execution stopped');
     }
-    async run(rows, progress) {
+    async run(rows, progress, execution = {}) {
       if (!this.ready || this.running) throw Error('Connect before running');
       this.stopRequested = false; this.running = true; this.paused = false; this.update('Running');
       try {
@@ -152,11 +125,14 @@
             const steps = row.unit === 'segments' ? Array.from({ length: row.count }, (_, n) => [67, 67, 66][n % 3]) : [row.count];
             for (const amount of steps) {
               await this.gate();
+              execution.move?.({ ...row, amount, index:i });
               await this.command(`MOV 1 ${row.motor} ${row.direction} ${amount} ${row.speed}`, Math.max(5000, Math.ceil(amount / row.speed * 1500) + 1000));
+              execution.settled?.();
             }
           }
           await this.gate(); progress(i + 1, rows.length);
         }
+        execution.complete?.();
         this.update('Complete');
       } catch (error) {
         if (error !== STOPPED && !this.emergencyStopping) { this.update(error.message); await this.emergencyStop(); }
@@ -168,7 +144,7 @@
   else root.FluixerSerial = api;
 })(typeof window === 'undefined' ? {} : window);
 
-if (typeof window !== 'undefined') FluixerSerial.init = function ({ state, source, changed }) {
+if (typeof window !== 'undefined') FluixerSerial.init = function ({ state, source, calibrationSource, changed, preparePlayback }) {
   const $ = id => document.getElementById('serial-' + id);
   let busy = false;
   const controller = new FluixerSerial.Controller(message => {
@@ -177,14 +153,18 @@ if (typeof window !== 'undefined') FluixerSerial.init = function ({ state, sourc
   });
   function showError(message = '') {
     $('status').textContent = message; $('status').hidden = !message;
+    document.getElementById('calibration-standard-status').textContent = message;
   }
   function sync() {
     const current = state(), active = busy || controller.running || controller.stopping;
-    $('connect').textContent = controller.port ? 'Disconnect' : 'Connect';
-    $('connect').disabled = active;
+    for (const button of [$('connect'), document.getElementById('calibration-connect')]) {
+      button.textContent = controller.port ? 'Disconnect' : 'Connect';
+      button.disabled = active;
+    }
     $('generated').hidden = current.imported;
     $('start').hidden = !current.imported;
     for (const id of ['start', 'compensated', 'original']) $(id).disabled = active || !current.available || !controller.ready;
+    document.getElementById('calibration-run').disabled = active || !current.calibrationAvailable || !controller.ready;
     $('pause').disabled = !controller.running || controller.stopping;
     const label = controller.paused ? 'Resume' : 'Pause after current command';
     $('pause').title = label; $('pause').setAttribute('aria-label', label);
@@ -197,7 +177,8 @@ if (typeof window !== 'undefined') FluixerSerial.init = function ({ state, sourc
     }
   }
   FluixerSerial.refresh = sync;
-  $('connect').addEventListener('click', async () => {
+  async function connect() {
+    if (busy || controller.running || controller.stopping || window.FluixerTour?.active) return;
     showError();
     if (!navigator.serial) { showError('Use Chrome or Edge over HTTPS / localhost to connect'); return; }
     busy = true; sync();
@@ -206,18 +187,27 @@ if (typeof window !== 'undefined') FluixerSerial.init = function ({ state, sourc
       else await controller.connect(navigator.serial);
     } catch (error) { showError(error.message); }
     finally { busy = false; changed(); }
-  });
-  async function run(compensated) {
-    if (busy || !state().available || !controller.ready || controller.running) return;
+  }
+  $('connect').addEventListener('click', connect);
+  document.getElementById('calibration-connect').addEventListener('click', connect);
+  async function run(compensated, calibration = false) {
+    if (window.FluixerTour?.active) return;
+    const available = calibration ? state().calibrationAvailable : state().available;
+    if (busy || !available || !controller.ready || controller.running || controller.stopping) return;
     busy = true; showError(); $('progress').value = 0; sync();
+    let execution;
     try {
       // Capture the export payload / imported file once; UI edits never mutate an active job.
-      const rows = FluixerSerial.parse(await source(compensated));
+      const job = await (calibration ? calibrationSource() : source(compensated));
+      const csv=typeof job==='string'?job:null;
+      const rows=csv!==null?FluixerSerial.parse(csv):window.FluixerCsv.validateDevice(job.rows);
+      execution = preparePlayback?.(csv, {calibration, compensated, rows,sequence:csv===null?job.sequence:null});
       $('progress').max = rows.length;
-      await controller.run(rows, (done, total) => { $('progress').max = total; $('progress').value = done; });
+      await controller.run(rows, (done, total) => { $('progress').max = total; $('progress').value = done; }, execution);
     } catch (error) { showError(error.message); }
-    finally { busy = false; changed(); }
+    finally { execution?.finish?.(); busy = false; changed(); }
   }
+  document.getElementById('calibration-run').addEventListener('click', () => run(false, true));
   $('compensated').addEventListener('click', () => run(true));
   $('original').addEventListener('click', () => run(false));
   $('start').addEventListener('click', () => run(false));

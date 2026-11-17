@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict');
+const {equal,snapshotBuffer,History}=require('../fluixer/ui/history.js');
+const pixels=new Uint8Array(65536),first=snapshotBuffer(null,pixels);
+assert.notEqual(first,pixels);
+assert.equal(snapshotBuffer(first,pixels),first);
+pixels[65535]=1;const second=snapshotBuffer(first,pixels);
+assert.notEqual(second,first);assert.equal(first[65535],0);
+assert(!equal(first,second));assert(equal({a:[1,2],pixels:first},{pixels:first,a:[1,2]}));
+assert(!equal({a:undefined},{b:undefined}));
+let state={pixels:first,n:0};const history=new History({capture:()=>state,restore:s=>state=s});
+state={pixels:second,n:1};history.checkpoint();history.move();assert.equal(state.pixels,first);
+history.move(true);assert.equal(state.pixels,second);
+console.log('PASS typed buffer equality, immutable snapshot sharing and undo/redo');

@@ -1,18 +1,13 @@
 """Authenticated website entry point. Local preview remains in webapp.py."""
 import hmac
-import json
 import os
 import threading
-from pathlib import Path
 from urllib.parse import urlsplit
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request
 from werkzeug.exceptions import HTTPException
 
-from . import __version__
-from .compensation import curve_settings
-from .pipeline import cylinder_settings
-from .webapp import csv_payload, pattern_key, preview, display_payload, _lock
+from .service import OPERATIONS, asset_payload, dispatch
 
 
 def create_app(config=None):
@@ -30,7 +25,6 @@ def create_app(config=None):
     app = Flask(__name__, static_folder=None)
     app.config.update(MAX_CONTENT_LENGTH=4*1024*1024)
     admission = threading.BoundedSemaphore(1)
-    ui = Path(__file__).parent / 'ui'
 
     @app.before_request
     def protect():
@@ -70,80 +64,25 @@ def create_app(config=None):
         return jsonify(status='ok')
 
     @app.get('/')
-    def index():
-        from html import escape
-        return Response(ui.joinpath('index.html').read_text(encoding='utf-8').replace('{{VERSION}}', escape(__version__)), mimetype='text/html')
-
     @app.get('/<path:asset>')
-    def asset(asset):
-        allowed = asset in {'quick-guide.js', 'motion-12.23.24.js', 'motion-LICENSE.txt', 'obstacle.js', 'interactive-constraints.js', 'serial-controller.js', 'app.js', 'history.js', 'image-input.js', 'visual-calibration.js', 'pipe-renderer.js', 'style.css'}
-        allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('css/*.css')}
-        allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('svg/*.svg')}
-        allowed = allowed or asset in {p.relative_to(ui).as_posix() for p in ui.glob('fonts/open/*') if p.suffix in {'.ttf', '.txt'}}
-        if not allowed:
-            return jsonify(error='Page not found'), 404
-        return send_from_directory(ui, asset)
+    def asset(asset=''):
+        payload=asset_payload(asset)
+        if payload is None:return jsonify(error='Page not found'),404
+        return Response(payload.body,content_type=payload.content_type,headers=payload.headers)
 
     @app.route('/api/<operation>', methods=['GET', 'POST'])
     def api(operation):
-        if operation not in {'display', 'export', 'calibration-standard', 'image', 'step', 'pipe-step', 'obstacle-step', 'print-preview', 'print-step'}:
+        if operation not in OPERATIONS:
             return jsonify(error='Endpoint not found'), 404
-        if request.method == 'GET' and operation != 'display':
-            return jsonify(error='Use POST for this endpoint'), 405
+        if request.method == 'GET':
+            return jsonify(error='Use POST for this endpoint'), 405, {'Allow':'POST'}
         if not admission.acquire(blocking=False):
             response = jsonify(error='The server is busy. Please try again shortly.')
             response.headers['Retry-After'] = '1'
             return response, 503
         try:
-            if request.method == 'GET':
-                args = request.args
-                if set(args) - {'pattern', 'width', 'height', 'x', 'z', 'compensation', 'cylinder'}:
-                    raise ValueError('Unknown preview parameters')
-                data = {}
-                for field in ('cylinder', 'compensation'):
-                    if field in args:
-                        data[field] = json.loads(args[field])
-                if args.get('pattern', 'captured-s') != 'captured-s':
-                    data['pattern'] = {'type': args['pattern'], **{key: args.get(key, '') for key in ('width', 'height', 'x', 'z')}}
-            else:
-                data = request.get_json()
-            if not isinstance(data, dict):
-                raise ValueError('Request body must be a JSON object')
-            if operation == 'obstacle-step':
-                if set(data)!={'source'}:raise ValueError('Expected a source field')
-                from .obstacle_step import parse_obstacle_step
-                with _lock:result=parse_obstacle_step(data['source'])
-                return jsonify(result)
-            if operation == 'print-step':
-                from .print_preview import print_step_payload
-                with _lock:body=print_step_payload(data)
-                return Response(body,content_type='application/step',headers={'Content-Disposition':'attachment; filename="fluixer-print.step"'})
-            if operation == 'print-preview':
-                from .print_preview import print_payload
-                with _lock:result=print_payload(data)
-                return jsonify(result)
-            if operation == 'calibration-standard':
-                from .standard_leveling import standard_csv_payload
-                with _lock:
-                    body,name,rows,count=standard_csv_payload(data)
-                return Response(body,content_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="{name}"','X-Row-Count':str(rows),'X-Liquid-Count':str(count)})
-            if operation == 'export':
-                with _lock:
-                    body, name, rows = csv_payload(data)
-                return Response(body, content_type='text/csv; charset=utf-8', headers={'Content-Disposition': f'attachment; filename="{name}"', 'X-Row-Count': str(rows)})
-            if operation == 'display':
-                with _lock:
-                    result = display_payload(data)
-                return jsonify(result)
-            if set(data) != {'source'}:
-                raise ValueError('Expected a source field')
-            if operation == 'image':
-                from .image_input import photo_subject
-                return jsonify(photo_subject(data['source']))
-            from .step_input import parse_step
-            from .pipe_step import parse_pipe_step
-            with _lock:
-                return jsonify({'step': parse_step, 'pipe-step': parse_pipe_step}[operation](data['source']))
+            payload=dispatch(operation,request.get_json())
+            return Response(payload.body,content_type=payload.content_type,headers=payload.headers)
         except (ValueError, TypeError, OverflowError) as error:
             return jsonify(error=str(error)), 400
         except HTTPException:

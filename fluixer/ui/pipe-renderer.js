@@ -44,7 +44,8 @@ class Renderer{
   for(const [name,v] of Object.entries({center:frame.center,right:basis.right,up:basis.up,back:basis.back}))gl.uniform3fv(uniform(name),v);
   gl.uniform2f(uniform('scale'),2*scale/rect.width,2*scale/rect.height);gl.uniform2f(uniform('pan'),2*pan[0]/rect.width,-2*pan[1]/rect.height);gl.uniform1f(uniform('depth'),Math.max(frame.extent*4,1));
   if(this.liquidData!==data||this.liquidInner!==inner||this.liquidSegments!==segments){
-   const parts=segments.filter(s=>s.phase==='liquid').map(s=>mesh(s.points,inner/2*.997));
+   const liquidRadius=Math.max(0,(inner-0.1)/2);
+   const parts=liquidRadius>0?segments.filter(s=>s.phase==='liquid').map(s=>mesh(s.points,liquidRadius)):[];
    const vertices=new Float32Array(parts.reduce((n,p)=>n+p.length,0));
    let offset=0;for(const part of parts){vertices.set(part,offset);offset+=part.length;}
    this.liquidCount=vertices.length/6;this.liquidSegments=segments;this.liquidData=data;this.liquidInner=inner;

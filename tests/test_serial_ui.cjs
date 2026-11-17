@@ -1,15 +1,13 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const api=require('../fluixer/ui/serial-controller.js');
 const nodes={};const node=id=>nodes[id]??={handlers:{},setAttribute(k,v){this[k]=v},addEventListener(k,v){this.handlers[k]=v}};
-const context={window:{addEventListener(){}},document:{getElementById:node,addEventListener(){}},navigator:{serial:{}},setTimeout,clearTimeout,TextEncoder,TextDecoder};
+const context={window:null,document:{getElementById:node,addEventListener(){}},navigator:{serial:{}},setTimeout,clearTimeout,TextEncoder,TextDecoder,addEventListener(){},FluixerCsv:require('../fluixer/ui/csv-commands.js')};
+context.window=context;
 vm.createContext(context);
-let code=fs.readFileSync(require('node:path').join(__dirname,'../fluixer/ui/serial-controller.js'),'utf8');
-vm.runInContext(code.split("if (typeof window !== 'undefined') FluixerSerial.init")[0],context);
-context.FluixerSerial=context.window.FluixerSerial;
-vm.runInContext("if (typeof window !== 'undefined') FluixerSerial.init"+code.split("if (typeof window !== 'undefined') FluixerSerial.init")[1],context);
+vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../fluixer/ui/serial-controller.js'),'utf8'),context);
 let ctrl,imported=false;const calls=[];
 context.FluixerSerial.Controller=class {constructor(){ctrl=this;this.ready=true;} async run(rows,progress){assert.equal(rows[0].count,imported?99:100);progress(1,1)}};
-context.FluixerSerial.init({state:()=>({available:true,imported}),source:async value=>{calls.push(value);return 'type,motor,direction,steps,speed,unit,seconds\nmove,l,fwd,'+(imported?99:100)+',400,steps,'},changed:()=>context.FluixerSerial.refresh()});
+context.FluixerSerial.init({state:()=>({available:true,calibrationAvailable:true,imported}),calibrationSource:async()=>({rows:[{motor:"l",direction:"fwd",count:100,speed:400,unit:"steps"}],sequence:{calibration:true}}),preparePlayback:(csv,options)=>{if(options.calibration){assert.equal(csv,null);assert.equal(options.sequence.calibration,true);}},source:async value=>{calls.push(value);return 'type,motor,direction,steps,speed,unit,seconds\nmove,l,fwd,'+(imported?99:100)+',400,steps,'},changed:()=>context.FluixerSerial.refresh()});
 (async()=>{
  assert.equal(node('serial-start').hidden,true);assert.equal(node('serial-generated').hidden,false);
  await node('serial-compensated').handlers.click();await node('serial-original').handlers.click();
@@ -17,5 +15,6 @@ context.FluixerSerial.init({state:()=>({available:true,imported}),source:async v
  imported=true;context.FluixerSerial.refresh();assert.equal(node('serial-start').hidden,false);assert.equal(node('serial-generated').hidden,true);
  await node('serial-start').handlers.click();assert.equal(node('serial-progress').value,1);
  imported=false;context.FluixerSerial.refresh();assert.equal(node('serial-start').hidden,true);
+ await node('calibration-run').handlers.click();
  console.log('PASS: generated original/compensated source selection, imported CSV mode, progress, exit.');
 })().catch(e=>{console.error(e);process.exitCode=1});

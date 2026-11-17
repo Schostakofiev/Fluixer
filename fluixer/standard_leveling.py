@@ -4,15 +4,13 @@ Only gas spacing and Pre-Add use the user's measured step length and gas factor.
 Pipe-height geometric compensation shifts the stripe; pattern plane, liquid
 factor and output-unit settings do not participate.
 """
-import csv
-import io
 import math
 from .cubic import CubicSpan, unit_roots
 from .geometry import Line, finite
 from .pipeline import cylinder_settings, pipe_path, path_bounds
 from .compensation import curve_settings
 from .path_partition import compensation_transform
-from .export import HEADER, MachineParameters, build_rows
+from .export import MachineParameters, build_rows
 
 STANDARD_STEPS = 100
 
@@ -118,8 +116,10 @@ def standard_rows(data):
     return rows,len(centers)
 
 
-def standard_csv_payload(data):
+def standard_plan_payload(data):
+    """Structured commands for calibration preview and serial execution."""
     rows,count=standard_rows(data)
-    stream=io.StringIO(newline='');writer=csv.writer(stream)
-    writer.writerow(HEADER);writer.writerows(rows)
-    return stream.getvalue().encode('utf-8-sig'),'fluixer_standard_100steps.csv',len(rows),count
+    return {'count':count,'commands':[
+        dict(motor=row[1],direction=row[2],count=row[3],speed=row[4],unit=row[5])
+        for row in rows
+    ]}
